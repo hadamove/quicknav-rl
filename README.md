@@ -21,7 +21,7 @@ Choose python from `.venv` as interpreter and it should work out of the box.
 
 ## TODO
 
-- [ ] Randomized start and goal positions
+- [x] Randomized start and goal positions
 - [ ] Better reward function
 - [ ] Better observations for the policy (currently position & rotation of the robot + position of the goal)
     - [ ] Maybe include rotation and/or distance of the goal

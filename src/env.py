@@ -150,21 +150,34 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         return jax.lax.select(state.terminal, 0.0, 1.0)
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
-        """Reset environment state."""
-        # Split key for generating goal position
-        key, goal_key = jax.random.split(key)
+        """Reset environment state with random start and goal positions."""
+        # Split key for generating start and goal positions
+        key, start_key, goal_key = jax.random.split(key, 3)
 
-        # Fixed start position for simplicity
-        start_x = 0.1 * params.arena_size
-        start_y = 0.1 * params.arena_size
-        start_theta = jnp.pi / 4  # Start facing towards goal approx (roughly diagonal)
+        # Generate random start position (x, y, theta) uniformly within the arena
+        start_x, start_y = jax.random.uniform(
+            start_key, shape=(2,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size
+        )
+
+        # Generate random start orientation
+        key, theta_key = jax.random.split(key)
+        start_theta = jax.random.uniform(theta_key, shape=(), dtype=jnp.float32, minval=-jnp.pi, maxval=jnp.pi)
 
         # Generate random goal position uniformly within the arena
-        goal_coords = jax.random.uniform(goal_key, shape=(2,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size)
-        goal_x, goal_y = goal_coords[0], goal_coords[1]
+        goal_x, goal_y = jax.random.uniform(
+            goal_key, shape=(2,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size
+        )
 
-        # Create the initial state with the random goal
-        state = EnvState(x=start_x, y=start_y, theta=start_theta, goal_x=goal_x, goal_y=goal_y, time=0, terminal=False)
+        # Create the initial state with the random start and goal
+        state = EnvState(
+            x=start_x,  # Random start x
+            y=start_y,  # Random start y
+            theta=start_theta,  # Random start theta
+            goal_x=goal_x,  # Random goal x
+            goal_y=goal_y,  # Random goal y
+            time=0,
+            terminal=False,
+        )
         return self.get_obs(state), state
 
     def get_obs(self, state: EnvState, params: Optional[EnvParams] = None) -> chex.Array:
