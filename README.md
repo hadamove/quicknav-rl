@@ -18,3 +18,14 @@ uv sync
 
 To get started, checkout `examples/intro.ipynb` for a quick introduction to training the agent, evaluation and visualization of the environment.
 Choose python from `.venv` as interpreter and it should work out of the box.
+
+## TODO
+
+- [ ] Randomized start and goal positions
+- [ ] Better reward function
+- [ ] Better observations for the policy (currently position & rotation of the robot + position of the goal)
+    - [ ] Maybe include rotation and/or distance of the goal
+- [ ] Randomized obstacles (walls) generation
+    - [ ] Simulate lidar sensor to detect walls and avoid them
+    - [ ] Add negative reward for hitting walls
+    - [ ] Add walls to visualization
