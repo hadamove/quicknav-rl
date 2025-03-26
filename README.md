@@ -5,7 +5,13 @@ This repository contains a JAX implementation of the robot navigation problem. T
 ## Installation
 
 1. Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
-2. Install requirements:
+2. Afterwards, create a new virtual environment and install the dependencies using `uv`:
 ```bash
 uv sync
 ```
+
+>Alternatively, you can use `poetry` or anything that works with `pyproject.toml` (but `uv` is ultra superior!)
+
+## Running
+
+To get started, checkout `src/notebooks/intro.ipynb` for a quick introduction to training the agent, evaluation and visualization of the environment.
