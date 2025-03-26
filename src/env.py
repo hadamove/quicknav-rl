@@ -1,31 +1,10 @@
-# Remove pygame import
-# import pygame
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import chex
-import imageio
 import jax
 import jax.numpy as jnp
-import numpy as np
 from flax import struct
 from gymnax.environments import environment, spaces
-
-# Import Pillow and imageio
-from PIL import Image, ImageDraw, ImageFont
-
-# TODO: move this to utils/vis
-# Define constants for visualization
-IMG_WIDTH = 600
-IMG_HEIGHT = 600
-ROBOT_RADIUS_PX = 10  # Robot radius in pixels on the image
-GOAL_RADIUS_PX = 12  # Goal radius in pixels on the image
-
-# Define colors as RGB tuples
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
-BLUE = (0, 0, 255)
-GREEN = (0, 255, 0)
-BLACK = (0, 0, 0)
 
 
 @struct.dataclass
@@ -56,9 +35,9 @@ class EnvParams(environment.EnvParams):
     goal_reward: float = 10.0  # Large reward for reaching the goal
 
 
-class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
+class NavigationEnv(environment.Environment[EnvState, EnvParams]):
     """
-    JAX compatible environment for a differential drive robot navigating to a goal.
+    Gymnax compatible environment for a differential drive robot navigating to a goal.
 
     ENVIRONMENT DESCRIPTION:
     - A simple two-wheeled robot operates in a square 2D arena.
@@ -195,7 +174,7 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
     @property
     def name(self) -> str:
         """Environment name."""
-        return "DiffDrive-v0"
+        return "NavigationEnv-v0"
 
     @property
     def num_actions(self) -> int:
@@ -228,95 +207,3 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
                 "terminal": spaces.Discrete(2),  # Boolean flag
             }
         )
-
-    # --- START: GIF Rendering Methods using Pillow ---
-    # TODO: move this to utils/vis
-
-    Frame = np.ndarray  # Type alias for frames (images)
-
-    @staticmethod
-    def render_frame(state: EnvState, params: EnvParams) -> Frame:
-        """Renders the current state into a NumPy array image using Pillow."""
-
-        # Create a blank white image
-        img = Image.new("RGB", (IMG_WIDTH, IMG_HEIGHT), color=WHITE)
-        draw = ImageDraw.Draw(img)
-        font = ImageFont.load_default()
-
-        # --- Calculate scaling and transformation ---
-        scale = min(IMG_WIDTH, IMG_HEIGHT) / params.arena_size
-
-        # Function to transform world (x, y) to image pixel coordinates (px, py)
-        def world_to_pixels(x, y):
-            # Convert JAX arrays/scalars to standard Python floats first
-            x_f, y_f = float(x), float(y)
-            px = int(x_f * scale)
-            py = int(IMG_HEIGHT - y_f * scale)  # Flip y-axis
-            # Clamp to image bounds just in case
-            px = max(0, min(IMG_WIDTH - 1, px))
-            py = max(0, min(IMG_HEIGHT - 1, py))
-            return px, py
-
-        # --- Draw Arena Boundaries (optional) ---
-        draw.rectangle([0, 0, IMG_WIDTH - 1, IMG_HEIGHT - 1], outline=BLACK, width=1)
-
-        # --- Draw Goal ---
-        goal_px, goal_py = world_to_pixels(state.goal_x, state.goal_y)
-        goal_bbox = [
-            goal_px - GOAL_RADIUS_PX,
-            goal_py - GOAL_RADIUS_PX,
-            goal_px + GOAL_RADIUS_PX,
-            goal_py + GOAL_RADIUS_PX,
-        ]
-        draw.ellipse(goal_bbox, fill=GREEN, outline=BLACK, width=1)
-
-        # --- Draw Robot ---
-        robot_px, robot_py = world_to_pixels(state.x, state.y)
-        robot_bbox = [
-            robot_px - ROBOT_RADIUS_PX,
-            robot_py - ROBOT_RADIUS_PX,
-            robot_px + ROBOT_RADIUS_PX,
-            robot_py + ROBOT_RADIUS_PX,
-        ]
-        draw.ellipse(robot_bbox, fill=BLUE, outline=BLACK, width=1)
-
-        # --- Draw Orientation line ---
-        line_len_world = (ROBOT_RADIUS_PX * 1.5) / scale  # Length in world units
-
-        # Convert state elements to float for numpy trig functions
-        state_x_f, state_y_f, state_theta_f = float(state.x), float(state.y), float(state.theta)
-        end_x_world = state_x_f + line_len_world * np.cos(state_theta_f)
-        end_y_world = state_y_f + line_len_world * np.sin(state_theta_f)
-        end_px, end_py = world_to_pixels(end_x_world, end_y_world)
-        draw.line([robot_px, robot_py, end_px, end_py], fill=RED, width=2)
-
-        time_text = f"T: {int(state.time)}"  # Use int() just in case
-        draw.text((5, 5), time_text, fill=BLACK, font=font)
-
-        # Convert Pillow Image to NumPy array (HxWxRGB format)
-        frame = np.array(img)
-
-        return frame
-
-    @staticmethod
-    def save_gif(frames: List[Frame], filename: str, duration_per_frame: float = 100):
-        # TODO: move this to utils
-        """Saves a list of NumPy array frames as a GIF.
-
-        Args:
-            frames: List of frames (HxWx3 NumPy arrays).
-            filename: Path to save the GIF file.
-            duration: Duration (in milliseconds) for each frame.
-        """
-        duration_per_frame_sec = duration_per_frame / 1000.0
-        try:
-            imageio.mimsave(
-                filename,
-                frames,
-                duration=duration_per_frame_sec,
-                loop=0,
-            )
-            print(f"GIF saved to {filename}")
-        except Exception as e:
-            print(f"Error saving GIF: {e}")
-            print("Ensure imageio is installed correctly.")
