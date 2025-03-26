@@ -22,13 +22,12 @@ Choose python from `.venv` as interpreter and it should work out of the box.
 ## TODO
 
 - [x] Randomized start and goal positions
-- [ ] Make evaluation faster
-- [ ] Experiment with better reward function
+- [ ] Experiment with different algorithms (currently we use PPO, good alternatives are PQN, SAC, TD3)
 - [ ] Experiment with differnt NN (currently we use default 2 hidden layers (64, 64), see `ppo.config` in `intro.ipynb`)
-- [ ] Experiment with different algorithms (currently we use PPO, good alternative is PQN)
 - [ ] Better observations for the policy (currently position & rotation of the robot + position of the goal)
     - [ ] Maybe include rotation and/or distance of the goal
 - [ ] Randomized obstacles (walls) generation
     - [ ] Simulate lidar sensor to detect walls and avoid them
     - [ ] Add negative reward for hitting walls
     - [ ] Add walls to visualization
+- [ ] Experiment with better reward function
