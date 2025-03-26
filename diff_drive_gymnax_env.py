@@ -1,17 +1,26 @@
-from typing import Any, Dict, Optional, Tuple
+# Remove pygame import
+# import pygame
+from typing import Any, Dict, List, Optional, Tuple
 
 import chex
+import imageio
 import jax
 import jax.numpy as jnp
-import pygame
+import numpy as np
 from flax import struct
 from gymnax.environments import environment, spaces
 
+# Import Pillow and imageio
+from PIL import Image, ImageDraw, ImageFont
+
+# TODO: move this to utils/vis
 # Define constants for visualization
-SCREEN_WIDTH = 600
-SCREEN_HEIGHT = 600
-ROBOT_RADIUS = 10
-GOAL_RADIUS = 12
+IMG_WIDTH = 600
+IMG_HEIGHT = 600
+ROBOT_RADIUS_PX = 10  # Robot radius in pixels on the image
+GOAL_RADIUS_PX = 12  # Goal radius in pixels on the image
+
+# Define colors as RGB tuples
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 BLUE = (0, 0, 255)
@@ -62,10 +71,7 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
 
     def __init__(self):
         super().__init__()
-        # Pygame visualization variables (initialized lazily)
-        self.screen = None
-        self.clock = None
-        self.font = None
+        # No visualization instance variables needed
 
     @property
     def default_params(self) -> EnvParams:
@@ -165,14 +171,6 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment state."""
         # For simplicity, fixed start and goal. Can be randomized using key.
-        # Example: Random start/goal (ensure they are not too close)
-        # key_start, key_goal = jax.random.split(key)
-        # start_x = jax.random.uniform(key_start, (), minval=0.1*params.arena_size, maxval=0.4*params.arena_size)
-        # start_y = jax.random.uniform(key_start, (), minval=0.1*params.arena_size, maxval=0.4*params.arena_size)
-        # start_theta = jax.random.uniform(key_start, (), minval=-jnp.pi, maxval=jnp.pi)
-        # goal_x = jax.random.uniform(key_goal, (), minval=0.6*params.arena_size, maxval=0.9*params.arena_size)
-        # goal_y = jax.random.uniform(key_goal, (), minval=0.6*params.arena_size, maxval=0.9*params.arena_size)
-
         start_x = 0.1 * params.arena_size
         start_y = 0.1 * params.arena_size
         start_theta = jnp.pi / 4  # Start facing towards goal approx
@@ -185,15 +183,12 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
     def get_obs(self, state: EnvState, params: Optional[EnvParams] = None) -> chex.Array:
         """Return observation from state."""
         # Observation: [x, y, cos(theta), sin(theta), goal_x, goal_y]
-        # Using cos/sin of theta is often better than raw angle for NNs
         return jnp.array(
             [state.x, state.y, jnp.cos(state.theta), jnp.sin(state.theta), state.goal_x, state.goal_y]
         ).astype(jnp.float32)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""
-        # Episode ends if agent is terminated OR exceeds max_steps
-        # NOTE: 'state.terminal' already incorporates goal_reached logic from step_env
         done_steps = state.time >= params.max_steps_in_episode
         return jnp.logical_or(state.terminal, done_steps)
 
@@ -202,14 +197,14 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
         """Environment name."""
         return "DiffDrive-v0"
 
-    # @property
-    # def num_actions(self) -> int:
-    #     """Number of actions possible in environment."""
-    #     return 3  # 0: Turn Left, 1: Move Forward, 2: Turn Right
+    @property
+    def num_actions(self) -> int:
+        """Number of actions possible in environment."""
+        return 3  # 0: Turn Left, 1: Move Forward, 2: Turn Right
 
     def action_space(self, params: Optional[EnvParams] = None) -> spaces.Discrete:
         """Action space of the environment."""
-        return spaces.Discrete(3)
+        return spaces.Discrete(self.num_actions)
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space of the environment."""
@@ -234,149 +229,94 @@ class DiffDriveEnv(environment.Environment[EnvState, EnvParams]):
             }
         )
 
-    # --- Visualization using Pygame (Not JIT-compatible) ---
+    # --- START: GIF Rendering Methods using Pillow ---
+    # TODO: move this to utils/vis
 
-    def _init_render(self):
-        """Initialize Pygame."""
-        if self.screen is None:
-            pygame.init()
-            pygame.display.set_caption(self.name)
-            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        if self.clock is None:
-            self.clock = pygame.time.Clock()
-        if self.font is None:
-            self.font = pygame.font.Font(None, 24)  # Basic font for text
+    Frame = np.ndarray  # Type alias for frames (images)
 
-    def render(self, state: EnvState, params: EnvParams):
-        """Render the current state using Pygame."""
-        self._init_render()
+    @staticmethod
+    def render_frame(state: EnvState, params: EnvParams) -> Frame:
+        """Renders the current state into a NumPy array image using Pillow."""
 
-        # --- Calculate scaling from world coords to screen coords ---
-        scale = min(SCREEN_WIDTH, SCREEN_HEIGHT) / params.arena_size
+        # Create a blank white image
+        img = Image.new("RGB", (IMG_WIDTH, IMG_HEIGHT), color=WHITE)
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
 
-        # Function to transform world (x, y) to screen (sx, sy)
-        # Pygame origin (0,0) is top-left
-        def world_to_screen(x, y):
-            sx = int(x * scale)
-            sy = int(SCREEN_HEIGHT - y * scale)  # Flip y-axis
-            return sx, sy
+        # --- Calculate scaling and transformation ---
+        scale = min(IMG_WIDTH, IMG_HEIGHT) / params.arena_size
 
-        # --- Clear screen ---
-        self.screen.fill(WHITE)
+        # Function to transform world (x, y) to image pixel coordinates (px, py)
+        def world_to_pixels(x, y):
+            # Convert JAX arrays/scalars to standard Python floats first
+            x_f, y_f = float(x), float(y)
+            px = int(x_f * scale)
+            py = int(IMG_HEIGHT - y_f * scale)  # Flip y-axis
+            # Clamp to image bounds just in case
+            px = max(0, min(IMG_WIDTH - 1, px))
+            py = max(0, min(IMG_HEIGHT - 1, py))
+            return px, py
 
         # --- Draw Arena Boundaries (optional) ---
-        pygame.draw.rect(self.screen, BLACK, (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT), 1)
+        draw.rectangle([0, 0, IMG_WIDTH - 1, IMG_HEIGHT - 1], outline=BLACK, width=1)
 
         # --- Draw Goal ---
-        goal_sx, goal_sy = world_to_screen(state.goal_x, state.goal_y)
-        pygame.draw.circle(self.screen, GREEN, (goal_sx, goal_sy), GOAL_RADIUS)
-        pygame.draw.circle(self.screen, BLACK, (goal_sx, goal_sy), GOAL_RADIUS, 1)  # Outline
+        goal_px, goal_py = world_to_pixels(state.goal_x, state.goal_y)
+        goal_bbox = [
+            goal_px - GOAL_RADIUS_PX,
+            goal_py - GOAL_RADIUS_PX,
+            goal_px + GOAL_RADIUS_PX,
+            goal_py + GOAL_RADIUS_PX,
+        ]
+        draw.ellipse(goal_bbox, fill=GREEN, outline=BLACK, width=1)
 
         # --- Draw Robot ---
-        robot_sx, robot_sy = world_to_screen(state.x, state.y)
-        # Body
-        pygame.draw.circle(self.screen, BLUE, (robot_sx, robot_sy), ROBOT_RADIUS)
-        pygame.draw.circle(self.screen, BLACK, (robot_sx, robot_sy), ROBOT_RADIUS, 1)  # Outline
-        # Orientation line
-        line_len = ROBOT_RADIUS * 1.5
-        end_x = state.x + line_len / scale * jnp.cos(state.theta)  # Back to world scale for calculation
-        end_y = state.y + line_len / scale * jnp.sin(state.theta)
-        end_sx, end_sy = world_to_screen(end_x, end_y)
-        pygame.draw.line(self.screen, RED, (robot_sx, robot_sy), (end_sx, end_sy), 3)
+        robot_px, robot_py = world_to_pixels(state.x, state.y)
+        robot_bbox = [
+            robot_px - ROBOT_RADIUS_PX,
+            robot_py - ROBOT_RADIUS_PX,
+            robot_px + ROBOT_RADIUS_PX,
+            robot_py + ROBOT_RADIUS_PX,
+        ]
+        draw.ellipse(robot_bbox, fill=BLUE, outline=BLACK, width=1)
 
-        # --- Display Timestep (optional) ---
-        time_text = self.font.render(f"Time: {state.time}", True, BLACK)
-        self.screen.blit(time_text, (10, 10))
+        # --- Draw Orientation line ---
+        line_len_world = (ROBOT_RADIUS_PX * 1.5) / scale  # Length in world units
 
-        # --- Update display ---
-        pygame.display.flip()
+        # Convert state elements to float for numpy trig functions
+        state_x_f, state_y_f, state_theta_f = float(state.x), float(state.y), float(state.theta)
+        end_x_world = state_x_f + line_len_world * np.cos(state_theta_f)
+        end_y_world = state_y_f + line_len_world * np.sin(state_theta_f)
+        end_px, end_py = world_to_pixels(end_x_world, end_y_world)
+        draw.line([robot_px, robot_py, end_px, end_py], fill=RED, width=2)
 
-        # --- Handle Pygame events (e.g., closing window) ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.close()
-                return False  # Indicate rendering should stop
+        time_text = f"T: {int(state.time)}"  # Use int() just in case
+        draw.text((5, 5), time_text, fill=BLACK, font=font)
 
-        # --- Control frame rate ---
-        self.clock.tick(30)  # Limit to 30 FPS
-        return True  # Indicate rendering continues
+        # Convert Pillow Image to NumPy array (HxWxRGB format)
+        frame = np.array(img)
 
-    def close(self):
-        """Close Pygame resources."""
-        if self.screen is not None:
-            pygame.display.quit()
-            pygame.quit()
-            self.screen = None
-            self.clock = None
-            self.font = None
+        return frame
 
+    @staticmethod
+    def save_gif(frames: List[Frame], filename: str, duration_per_frame: float = 100):
+        # TODO: move this to utils
+        """Saves a list of NumPy array frames as a GIF.
 
-# --- Example Usage ---
-if __name__ == "__main__":
-    env = DiffDriveEnv()
-    params = env.default_params
-    key = jax.random.PRNGKey(0)
-
-    # Reset environment
-    key, reset_key = jax.random.split(key)
-    obs, state = env.reset(reset_key, params)
-
-    print("Initial State:", state)
-    print("Initial Obs:", obs)
-    print("Observation Space:", env.observation_space(params))
-    print("Action Space:", env.action_space(params))
-
-    # Simple interaction loop with rendering
-    ep_reward = 0
-    rendering_active = True
-    try:
-        for step in range(params.max_steps_in_episode * 2):  # Run a bit longer to see termination
-            if not rendering_active:
-                break
-
-            # Render current state
-            rendering_active = env.render(state, params)
-            if not rendering_active:
-                print("Rendering window closed by user.")
-                break
-
-            # Sample a random action (replace with agent policy)
-            key, action_key = jax.random.split(key)
-            # action = env.action_space(params).sample(action_key)
-            # Simple policy: turn towards goal, then move forward
-            # dx = state.goal_x - state.x
-            # dy = state.goal_y - state.y
-            # goal_angle = jnp.arctan2(dy, dx)
-            # angle_diff = goal_angle - state.theta
-            # # Normalize angle diff to [-pi, pi]
-            # angle_diff = jnp.arctan2(jnp.sin(angle_diff), jnp.cos(angle_diff))
-
-            # if abs(angle_diff) > 0.2:  # If not aligned, turn
-            #     action = 0 if angle_diff > 0 else 2  # 0=Left, 2=Right
-            # else:  # If aligned, move forward
-            #     action = 1
-
-            # Do completely random action
-            action = jax.random.randint(action_key, (), 0, env.num_actions)
-
-            # Step environment
-            key, step_key = jax.random.split(key)
-            next_obs, next_state, reward, done, info = env.step(step_key, state, action, params)
-
-            print(f"Step: {state.time}, Action: {action}, Reward: {reward:.3f}, Done: {done}")
-            # print(f"  State: x={next_state.x:.2f}, y={next_state.y:.2f}, th={next_state.theta:.2f}")
-
-            ep_reward += reward
-            state = next_state  # Prepare for next step
-
-            if done:
-                print(f"Episode finished after {state.time} steps. Total Reward: {ep_reward:.3f}")
-                # Render the final state
-                rendering_active = env.render(state, params)
-                # Optional pause at the end
-                if rendering_active:
-                    pygame.time.wait(2000)
-                break
-
-    finally:
-        env.close()  # Ensure Pygame resources are released
+        Args:
+            frames: List of frames (HxWx3 NumPy arrays).
+            filename: Path to save the GIF file.
+            duration: Duration (in milliseconds) for each frame.
+        """
+        duration_per_frame_sec = duration_per_frame / 1000.0
+        try:
+            imageio.mimsave(
+                filename,
+                frames,
+                duration=duration_per_frame_sec,
+                loop=0,
+            )
+            print(f"GIF saved to {filename}")
+        except Exception as e:
+            print(f"Error saving GIF: {e}")
+            print("Ensure imageio is installed correctly.")
