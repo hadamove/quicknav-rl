@@ -29,9 +29,12 @@ class EnvParams(environment.EnvParams):
     goal_tolerance: float = 0.1  # meters
     arena_size: float = 5.0  # meters (square arena from 0 to arena_size)
     dt: float = 0.1  # simulation timestep
-    # Simplified action parameters (can be adjusted)
+
+    # Action parameters
     linear_speed: float = 1.0  # m/s for 'forward' action
-    angular_speed: float = jnp.pi / 4  # rad/s for 'turn' actions
+    angular_speed: float = jnp.pi / 2  # rad/s for 'turn' actions
+
+    # Reward parameters
     step_penalty: float = 0.01  # Small penalty for each step
     goal_reward: float = 10.0  # Large reward for reaching the goal
 
@@ -74,9 +77,9 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         # Define possible linear speeds based on action
         possible_vs = jnp.array(
             [
-                params.linear_speed * 0.2,  # Small forward speed while turning left
+                params.linear_speed * 0.5,  # Small forward speed while turning left
                 params.linear_speed,  # Full forward speed
-                params.linear_speed * 0.2,  # Small forward speed while turning right
+                params.linear_speed * 0.5,  # Small forward speed while turning right
             ],
             dtype=jnp.float32,
         )
