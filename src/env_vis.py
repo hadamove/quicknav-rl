@@ -36,11 +36,9 @@ def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_h
 
     def world_to_pixels(x, y) -> Tuple[int, int]:
         """Converts world coordinates to integer pixel coordinates."""
-        x_f, y_f = float(x), float(y)
+        x_f, y_f = float(x), float(y)  # Ensure input is float
         px = int(x_f * scale)
         py = int(img_height - y_f * scale)  # Flip y-axis
-        px = max(0, min(img_width - 1, px))
-        py = max(0, min(img_height - 1, py))
         return px, py
 
     def rotate_point(x, y, angle_rad) -> Tuple[float, float]:
@@ -76,11 +74,6 @@ def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_h
     left_wheel_local_corners = [(whl, hw + whw), (-whl, hw + whw), (-whl, hw - whw), (whl, hw - whw)]
     right_wheel_local_corners = [(whl, -hw + whw), (-whl, -hw + whw), (-whl, -hw - whw), (whl, -hw - whw)]
 
-    # --- Extract state variables ---
-    robot_center_x = float(state.x)
-    robot_center_y = float(state.y)
-    robot_angle_rad = float(state.theta)
-
     # --- Draw Goal ---
     goal_px, goal_py = world_to_pixels(state.goal_x, state.goal_y)
     # Calculate goal radius in pixels based on world size? Let's use a fixed pixel size for now.
@@ -89,23 +82,19 @@ def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_h
     draw.ellipse(goal_bbox, fill=GOAL_COLOR, width=1)
 
     # --- Draw Robot Chassis ---
-    chassis_pixel_corners = get_polygon_pixels(chassis_local_corners, robot_center_x, robot_center_y, robot_angle_rad)
+    chassis_pixel_corners = get_polygon_pixels(chassis_local_corners, state.x, state.y, state.theta)
     draw.polygon(chassis_pixel_corners, fill=ROBOT_CHASSIS_COLOR, width=1)
 
     # --- Draw Robot Wheels ---
-    left_wheel_pixel_corners = get_polygon_pixels(
-        left_wheel_local_corners, robot_center_x, robot_center_y, robot_angle_rad
-    )
+    left_wheel_pixel_corners = get_polygon_pixels(left_wheel_local_corners, state.x, state.y, state.theta)
     draw.polygon(left_wheel_pixel_corners, fill=ROBOT_WHEEL_COLOR, width=1)
 
-    right_wheel_pixel_corners = get_polygon_pixels(
-        right_wheel_local_corners, robot_center_x, robot_center_y, robot_angle_rad
-    )
+    right_wheel_pixel_corners = get_polygon_pixels(right_wheel_local_corners, state.x, state.y, state.theta)
     draw.polygon(right_wheel_pixel_corners, fill=ROBOT_WHEEL_COLOR, width=1)
 
-    # --- Display Timestep ---
+    # --- Display Text Info (Timestamp & Reward) ---
     time_text = f"T: {int(state.time)}"
-    reward_text = f"R: {state.accumulated_reward:.2f}"
+    reward_text = f"R: {float(state.accumulated_reward):.2f}"
     draw.text((5, 5), time_text, fill=TEXT_COLOR, font=font)
     draw.text((5, 20), reward_text, fill=TEXT_COLOR, font=font)
 
@@ -121,7 +110,7 @@ def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float =
     Args:
         frames: List of frames (HxWx3 NumPy arrays).
         filename: Path to save the GIF file.
-        duration: Duration (in milliseconds) for each frame.
+        duration_per_frame: Duration (in milliseconds) for each frame.
     """
     duration_per_frame_sec = duration_per_frame / 1000.0
     try:
@@ -129,7 +118,7 @@ def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float =
             filename,
             list(frames),
             duration=duration_per_frame_sec,
-            loop=0,
+            loop=0,  # loop=0 means loop indefinitely
         )
         print(f"GIF saved to {filename}")
     except Exception as e:
