@@ -1,8 +1,12 @@
 # QuickNav - Robot Navigation in JAX
 
-> TODO: better project name
+> TODO: possibly better project name
 
 This repository contains a JAX implementation of the robot navigation problem. The goal is to navigate a robot in a 2D grid world with obstacles, using reinforcement learning techniques.
+
+## Demo
+
+![Demo](./media/demo.gif)
 
 ## Installation
 
