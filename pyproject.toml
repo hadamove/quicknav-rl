@@ -11,7 +11,13 @@ requires-python = ">=3.10"
 dependencies = ["imageio>=2.37.0", "rejax>=0.1.1"]
 
 [dependency-groups]
-dev = ["ipykernel>=6.29.5"]
+dev = [
+    "ipykernel>=6.29.5",
+    "ruff>=0.11.2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 120

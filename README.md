@@ -18,6 +18,11 @@ uv sync
 
 > Alternatively, you can use `poetry` or anything that works with `pyproject.toml` (but `uv` is ultra superior!)
 
+To format the code, you can run:
+```bash
+uvx ruff format
+```
+
 ## Running
 
 To get started, checkout `examples/intro.ipynb` for a quick introduction to training the agent, evaluation and visualization of the environment.
