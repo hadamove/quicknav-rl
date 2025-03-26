@@ -18,6 +18,7 @@ class EnvState(environment.EnvState):
     goal_y: float  # Goal y position
     time: int  # Current timestep
     terminal: bool  # Flag indicating if the episode ended
+    accumulated_reward: float = 0.0  # Accumulated reward during the episode
 
 
 @struct.dataclass
@@ -127,6 +128,7 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
             theta=new_theta,
             time=state.time + 1,
             terminal=done,  # Store termination status (used by is_terminal)
+            accumulated_reward=state.accumulated_reward + reward,
         )
 
         # --- Get observation and info ---

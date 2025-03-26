@@ -29,7 +29,7 @@ def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_h
     # Create a blank white image
     img = Image.new("RGB", (img_width, img_height), color=BACKGROUND_COLOR)
     draw = ImageDraw.Draw(img)
-    font = ImageFont.load_default()  # Use default font
+    font = ImageFont.load_default(size=12)  # Use default font
 
     # --- Calculate scaling and transformation ---
     scale = min(img_width, img_height) / params.arena_size
@@ -105,7 +105,9 @@ def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_h
 
     # --- Display Timestep ---
     time_text = f"T: {int(state.time)}"
+    reward_text = f"R: {state.accumulated_reward:.2f}"
     draw.text((5, 5), time_text, fill=TEXT_COLOR, font=font)
+    draw.text((5, 20), reward_text, fill=TEXT_COLOR, font=font)
 
     # Convert Pillow Image to NumPy array (HxWxRGB format)
     frame = np.array(img, dtype=np.uint8)  # Ensure uint8 dtype
