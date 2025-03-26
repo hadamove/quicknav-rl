@@ -149,13 +149,19 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment state."""
-        # For simplicity, fixed start and goal. Can be randomized using key.
+        # Split key for generating goal position
+        key, goal_key = jax.random.split(key)
+
+        # Fixed start position for simplicity
         start_x = 0.1 * params.arena_size
         start_y = 0.1 * params.arena_size
-        start_theta = jnp.pi / 4  # Start facing towards goal approx
-        goal_x = 0.9 * params.arena_size
-        goal_y = 0.9 * params.arena_size
+        start_theta = jnp.pi / 4  # Start facing towards goal approx (roughly diagonal)
 
+        # Generate random goal position uniformly within the arena
+        goal_coords = jax.random.uniform(goal_key, shape=(2,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size)
+        goal_x, goal_y = goal_coords[0], goal_coords[1]
+
+        # Create the initial state with the random goal
         state = EnvState(x=start_x, y=start_y, theta=start_theta, goal_x=goal_x, goal_y=goal_y, time=0, terminal=False)
         return self.get_obs(state), state
 
@@ -168,8 +174,11 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Check whether state is terminal."""
-        done_steps = state.time >= params.max_steps_in_episode
-        return jnp.logical_or(state.terminal, done_steps)
+        # Check if goal was reached in the previous step OR if max steps exceeded
+        time_exceeded = state.time >= params.max_steps_in_episode
+        # The state.terminal flag is set to True if goal_reached or time_exceeded was True in the *previous* step.
+        done = jnp.logical_or(state.terminal, time_exceeded)
+        return done
 
     @property
     def name(self) -> str:
