@@ -54,18 +54,16 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
 
     def __init__(self):
         super().__init__()
-        # No visualization instance variables needed
 
     @property
     def default_params(self) -> EnvParams:
-        # Default environment parameters
         return EnvParams()
 
     def step_env(
         self,
         key: chex.PRNGKey,
         state: EnvState,
-        action: chex.Numeric,  # Typically an int for Discrete action space
+        action: chex.Numeric,
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Perform single timestep state transition."""
@@ -86,7 +84,11 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
 
         # Define possible angular speeds based on action
         possible_omegas = jnp.array(
-            [params.angular_speed, 0.0, -params.angular_speed],  # Turn left  # Go straight  # Turn right
+            [
+                params.angular_speed,  # Turn left
+                0.0,  # Go straight
+                -params.angular_speed,  # Turn right
+            ],
             dtype=jnp.float32,
         )
 
@@ -130,13 +132,12 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
             y=new_y,
             theta=new_theta,
             time=state.time + 1,
-            terminal=done,  # Store termination status (used by is_terminal)
+            terminal=done,
             accumulated_reward=state.accumulated_reward + reward,
         )
 
         # --- Get observation and info ---
         obs = self.get_obs(state)
-        # The discount is often used in RL algorithms, gymnax includes it in info
         info = {"discount": self.discount(state, params)}
 
         return (
