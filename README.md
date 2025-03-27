@@ -31,12 +31,18 @@ Choose python from `.venv` as interpreter and it should work out of the box.
 ## TODO
 
 - [x] Randomized start and goal positions
+- [x] Randomized obstacles (walls) generation
+    - [x] Simulate lidar sensor to detect walls and avoid them
+    - [x] Add negative reward for hitting walls
+    - [x] Add walls to visualization
+- [ ] Add support for decimation/frame skipping in the environment (policy predicts 1 action, but environment takes N steps with that action)
+    - Making decisions too frequently makes it harder to relate which actions led to which outcome. Longer actions or actions that persist allow the agent to plan from a higher level at a cost of delayed response.
+    - This will allow us to lower `env_params.dt` to 0.01 or even lower, which will make the simulation look smoother
+- [ ] "Better" walls - something that actually resembles a real world room not just random rectangles 😆
+- [ ] W&B integration -- see https://github.com/keraJLi/rejax/blob/main/examples/wandb_integration.py
+    - [ ] Essentially just copy/reimplement a `wandb_callback` like in that file (might be outdated)
 - [ ] Experiment with different algorithms (currently we use PPO, good alternatives are PQN, SAC, TD3)
 - [ ] Experiment with differnt NN (currently we use default 2 hidden layers (64, 64), see `ppo.config` in `intro.ipynb`)
 - [ ] Better observations for the policy (currently position & rotation of the robot + position of the goal)
     - [ ] Maybe include rotation and/or distance of the goal
-- [ ] Randomized obstacles (walls) generation
-    - [ ] Simulate lidar sensor to detect walls and avoid them
-    - [ ] Add negative reward for hitting walls
-    - [ ] Add walls to visualization
 - [ ] Experiment with better reward function
