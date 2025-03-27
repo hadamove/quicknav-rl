@@ -6,143 +6,147 @@ from PIL import Image, ImageDraw, ImageFont
 
 from env import EnvParams, EnvState
 
-# Robot dimensions
+# TODO: refactor this whole file
+
+# Dimensions and Colors
 ROBOT_LENGTH = 0.3
 ROBOT_WIDTH = 0.2
 WHEEL_LENGTH = 0.15
 WHEEL_WIDTH = 0.05
 
-# Rendering colors
-BACKGROUND_COLOR = (255, 255, 255)
-ROBOT_CHASSIS_COLOR = (100, 100, 100)
-ROBOT_WHEEL_COLOR = (50, 50, 50)
-GOAL_COLOR = (0, 255, 0)
-LIDAR_COLOR = (255, 0, 0)
-TEXT_COLOR = (0, 0, 0)
+COLORS = {
+    "background": (255, 255, 255),
+    "chassis": (100, 100, 100),
+    "wheel": (50, 50, 50),
+    "goal": (63, 176, 0),
+    "default_beam": (30, 30, 30),
+    "wall_beam": (255, 50, 50),
+    "goal_beam": (70, 140, 40),
+    "text": (0, 0, 0),
+}
 
 Frame = np.ndarray
+AA_SCALE = 4
 
 
-def compute_obstacle_distance_np(x: float, y: float, dx: float, dy: float, obstacles: np.ndarray) -> float:
+def world_to_pixels(x: float, y: float, scale: float, img_height: int) -> Tuple[int, int]:
+    return int(x * scale), int(img_height - y * scale)
+
+
+def rotate_point(x: float, y: float, angle: float) -> Tuple[float, float]:
+    ca, sa = np.cos(angle), np.sin(angle)
+    return x * ca - y * sa, x * sa + y * ca
+
+
+def get_polygon_pixels(
+    corners: List[Tuple[float, float]], cx: float, cy: float, angle: float, scale: float, img_height: int
+) -> List[Tuple[int, int]]:
+    return [
+        world_to_pixels(cx + px, cy + py, scale, img_height)
+        for (lx, ly) in corners
+        for (px, py) in [rotate_point(lx, ly, angle)]
+    ]
+
+
+def compute_obstacle_distance(x: float, y: float, dx: float, dy: float, obstacles: np.ndarray) -> float:
     eps = 1e-6
     distances = []
-    for obs in obstacles:
-        ox, oy, ow, oh = obs
-        # x slabs
+    for ox, oy, ow, oh in obstacles:
         if abs(dx) < eps:
-            t_min_x, t_max_x = -float("inf"), float("inf")
+            tmin_x, tmax_x = -np.inf, np.inf
         else:
-            t1 = (ox - x) / dx
-            t2 = ((ox + ow) - x) / dx
-            t_min_x, t_max_x = min(t1, t2), max(t1, t2)
-        # y slabs
+            t1, t2 = (ox - x) / dx, ((ox + ow) - x) / dx
+            tmin_x, tmax_x = min(t1, t2), max(t1, t2)
         if abs(dy) < eps:
-            t_min_y, t_max_y = -float("inf"), float("inf")
+            tmin_y, tmax_y = -np.inf, np.inf
         else:
-            t3 = (oy - x) / dy  # Note: use x? Actually, we need to compute based on y.
-            # Correction: use y for y-slabs:
-            t3 = (oy - y) / dy
-            t4 = ((oy + oh) - y) / dy
-            t_min_y, t_max_y = min(t3, t4), max(t3, t4)
-        t_entry = max(t_min_x, t_min_y)
-        t_exit = min(t_max_x, t_max_y)
-        if t_exit >= t_entry and t_exit > 0:
-            t_entry = t_entry if t_entry > 0 else float("inf")
+            t1, t2 = (oy - y) / dy, ((oy + oh) - y) / dy
+            tmin_y, tmax_y = min(t1, t2), max(t1, t2)
+        t_entry, t_exit = max(tmin_x, tmin_y), min(tmax_x, tmax_y)
+        if t_exit >= t_entry > 0:
             distances.append(t_entry)
-    if distances:
-        return min(distances)
-    else:
-        return float("inf")
+    return min(distances) if distances else np.inf
 
 
 def render_frame(state: EnvState, params: EnvParams, img_width: int = 600, img_height: int = 600) -> Frame:
-    """Renders the current state including obstacles and lidar beams with collisions."""
-    img = Image.new("RGB", (img_width, img_height), color=BACKGROUND_COLOR)
+    # Create high-resolution image for antialiasing
+    high_width, high_height = img_width * AA_SCALE, img_height * AA_SCALE
+    img = Image.new("RGB", (high_width, high_height), color=COLORS["background"])
     draw = ImageDraw.Draw(img)
     font = ImageFont.load_default(size=12)
-    scale = min(img_width, img_height) / params.arena_size
+    scale = min(high_width, high_height) / params.arena_size
 
-    def world_to_pixels(x, y) -> Tuple[int, int]:
-        px = int(float(x) * scale)
-        py = int(img_height - float(y) * scale)
-        return px, py
-
-    def rotate_point(x, y, angle_rad) -> Tuple[float, float]:
-        cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
-        return x * cos_a - y * sin_a, x * sin_a + y * cos_a
-
-    def get_polygon_pixels(
-        local_corners: List[Tuple[float, float]], center_x: float, center_y: float, angle_rad: float
-    ) -> List[Tuple[int, int]]:
-        return [
-            world_to_pixels(
-                center_x + rotate_point(lx, ly, angle_rad)[0], center_y + rotate_point(lx, ly, angle_rad)[1]
-            )
-            for lx, ly in local_corners
-        ]
-
-    # --- Draw obstacles ---
+    # Draw obstacles
     if state.obstacles is not None:
-        obstacles = np.array(state.obstacles)
-        for obs in obstacles:
-            ox, oy, ow, oh = obs
-            top_left = world_to_pixels(ox, oy + oh)
-            bottom_right = world_to_pixels(ox + ow, oy)
-            draw.rectangle([top_left, bottom_right], fill=(200, 200, 200), outline=(0, 0, 0))
+        for ox, oy, ow, oh in np.array(state.obstacles):
+            draw.rectangle(
+                [world_to_pixels(ox, oy + oh, scale, high_height), world_to_pixels(ox + ow, oy, scale, high_height)],
+                fill=(200, 200, 200),
+            )
 
-    # --- Draw Goal ---
-    goal_px, goal_py = world_to_pixels(state.goal_x, state.goal_y)
-    goal_radius_px = int(0.02 * min(img_width, img_height))
-    goal_bbox = [goal_px - goal_radius_px, goal_py - goal_radius_px, goal_px + goal_radius_px, goal_py + goal_radius_px]
-    draw.ellipse(goal_bbox, fill=GOAL_COLOR, width=1)
+    # Draw goal
+    gx, gy = world_to_pixels(state.goal_x, state.goal_y, scale, high_height)
+    r = int(0.02 * min(high_width, high_height))
+    draw.ellipse([gx - r, gy - r, gx + r, gy + r], fill=COLORS["goal"], width=1)
 
-    # --- Draw Robot Chassis ---
-    hl, hw = ROBOT_LENGTH / 2, ROBOT_WIDTH / 2
-    chassis_local = [(hl, hw), (-hl, hw), (-hl, -hw), (hl, -hw)]
-    chassis_pixels = get_polygon_pixels(chassis_local, state.x, state.y, state.theta)
-    draw.polygon(chassis_pixels, fill=ROBOT_CHASSIS_COLOR, width=1)
-
-    # --- Draw Robot Wheels ---
-    left_wheel_local = [
-        (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-        (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-        (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-        (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-    ]
-    right_wheel_local = [
-        (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-        (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-        (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-        (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-    ]
-    left_wheel_pixels = get_polygon_pixels(left_wheel_local, state.x, state.y, state.theta)
-    right_wheel_pixels = get_polygon_pixels(right_wheel_local, state.x, state.y, state.theta)
-    draw.polygon(left_wheel_pixels, fill=ROBOT_WHEEL_COLOR, width=1)
-    draw.polygon(right_wheel_pixels, fill=ROBOT_WHEEL_COLOR, width=1)
-
-    # --- Draw Lidar Beams with collision detection ---
-    num_beams = params.lidar_num_beams
-    fov_rad = params.lidar_fov * np.pi / 180.0
-    beam_offsets = np.linspace(-fov_rad / 2, fov_rad / 2, num_beams)
-    beam_angles = state.theta + beam_offsets
-    obstacles = np.array(state.obstacles) if state.obstacles is not None else np.empty((0, 4))
-
+    # Lidar beams with collision detection
+    obs = np.array(state.obstacles) if state.obstacles is not None else np.empty((0, 4))
+    fov_rad = np.radians(params.lidar_fov)
+    beam_angles = state.theta + np.linspace(-fov_rad / 2, fov_rad / 2, params.lidar_num_beams)
     for angle in beam_angles:
-        dx = np.cos(angle)
-        dy = np.sin(angle)
-        obs_dist = compute_obstacle_distance_np(state.x, state.y, dx, dy, obstacles)
-        d = min(obs_dist, obs_dist, params.lidar_max_distance)
-        end_x = state.x + d * dx
-        end_y = state.y + d * dy
-        start_px = world_to_pixels(state.x, state.y)
-        end_px = world_to_pixels(end_x, end_y)
-        draw.line([start_px, end_px], fill=LIDAR_COLOR, width=1)
+        dx, dy = np.cos(angle), np.sin(angle)
+        wall_d = compute_obstacle_distance(state.x, state.y, dx, dy, obs)
+        ocx, ocy = state.x - state.goal_x, state.y - state.goal_y
+        b = 2 * (ocx * dx + ocy * dy)
+        c = ocx**2 + ocy**2 - params.goal_tolerance**2
+        disc = b * b - 4 * c
+        t_goal = min(
+            [t for t in [(-b - np.sqrt(disc)) / 2, (-b + np.sqrt(disc)) / 2] if disc >= 0 and t >= 0] or [np.inf]
+        )
+        d = min(wall_d, t_goal, params.lidar_max_distance)
+        if d == t_goal and d < params.lidar_max_distance:
+            color = COLORS["goal_beam"]
+        elif d == wall_d and d < params.lidar_max_distance:
+            color = COLORS["wall_beam"]
+        else:
+            color = COLORS["default_beam"]
+        start = world_to_pixels(state.x, state.y, scale, high_height)
+        end = world_to_pixels(state.x + d * dx, state.y + d * dy, scale, high_height)
+        draw.line([start, end], fill=color, width=1)
 
-    # --- Draw Text Info ---
-    draw.text((5, 5), f"T: {int(state.time)}", fill=TEXT_COLOR, font=font)
-    draw.text((5, 20), f"R: {float(state.accumulated_reward):.2f}", fill=TEXT_COLOR, font=font)
+    # Draw robot chassis
+    chassis = [
+        (ROBOT_LENGTH / 2, ROBOT_WIDTH / 2),
+        (-ROBOT_LENGTH / 2, ROBOT_WIDTH / 2),
+        (-ROBOT_LENGTH / 2, -ROBOT_WIDTH / 2),
+        (ROBOT_LENGTH / 2, -ROBOT_WIDTH / 2),
+    ]
+    draw.polygon(get_polygon_pixels(chassis, state.x, state.y, state.theta, scale, high_height), fill=COLORS["chassis"])
 
-    return np.array(img, dtype=np.uint8)
+    # Draw wheels
+    wheels = [
+        [
+            (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
+            (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
+            (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
+            (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
+        ],
+        [
+            (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
+            (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
+            (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
+            (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
+        ],
+    ]
+    for wheel in wheels:
+        draw.polygon(get_polygon_pixels(wheel, state.x, state.y, state.theta, scale, high_height), fill=COLORS["wheel"])
+
+    # Draw text info
+    draw.text((5 * AA_SCALE, 5 * AA_SCALE), f"T: {int(state.time)}", fill=COLORS["text"], font=font)
+    draw.text((5 * AA_SCALE, 20 * AA_SCALE), f"R: {state.accumulated_reward:.2f}", fill=COLORS["text"], font=font)
+
+    # Downsample for antialiasing
+    return np.array(img.resize((img_width, img_height), resample=Image.Resampling.LANCZOS))
 
 
 def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float = 0.1):
