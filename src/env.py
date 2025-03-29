@@ -1,3 +1,5 @@
+"""JAX environment for differential drive robot navigation with lidar sensing."""
+
 from typing import Any, Dict, Tuple, Union
 
 import chex
@@ -6,8 +8,9 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 
-from geometry import generate_obstacles, point_to_rectangle_distance, sample_valid_positions
+from geometry import point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
+from rooms import generate_room, sample_positions
 
 
 @struct.dataclass
@@ -25,10 +28,9 @@ class EnvParams(environment.EnvParams):
     dt: float = 0.1  # Simulation timestep (seconds)
 
     # Environment parameters
-    arena_size: float = 5.0  # Width and height of the square arena (meters)
-    num_obstacles: int = struct.field(pytree_node=False, default=5)  # Number of obstacles in the environment
-    min_obstacle_size: float = 0.3  # Minimum width/height of obstacles (meters)
-    max_obstacle_size: float = 1.0  # Maximum width/height of obstacles (meters)
+    arena_size: float = 8.0  # Width and height of the square arena (meters)
+    grid_size: int = struct.field(pytree_node=False, default=8)  # Grid size for room generation
+    target_carved_percent: float = 0.3  # Target percentage of carved out space
 
     # Sensor parameters
     lidar_num_beams: int = struct.field(pytree_node=False, default=32)  # Number of lidar beams
@@ -66,13 +68,13 @@ class EnvState(struct.PyTreeNode):
     obstacles: jnp.ndarray  # Obstacle coordinates as [x, y, width, height] array
 
     # Sensor readings
-    lidar_distances: jnp.ndarray = jnp.array([])  # Distance readings from lidar beams (meters)
-    lidar_collision_types: jnp.ndarray = jnp.array([])  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
+    lidar_distances: jnp.ndarray  # Distance readings from lidar beams (meters)
+    lidar_collision_types: jnp.ndarray  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
 
     # Episode state
-    time: int = 0  # Current timestep in the episode
-    terminal: jnp.ndarray = jnp.array(False)  # Whether the episode has terminated
-    accumulated_reward: jnp.ndarray = jnp.array(0.0)  # Total reward collected so far
+    time: int  # Current timestep in the episode
+    terminal: jnp.ndarray  # Whether the episode has terminated
+    accumulated_reward: jnp.ndarray  # Total reward collected so far
 
 
 class NavigationEnv(environment.Environment):
@@ -105,7 +107,7 @@ class NavigationEnv(environment.Environment):
         new_x = jnp.clip(state.x + dx, params.robot_radius, params.arena_size - params.robot_radius)
         new_y = jnp.clip(state.y + dy, params.robot_radius, params.arena_size - params.robot_radius)
 
-        # 2. Collision detection with accurate rectangle distance
+        # 2. Collision detection
         # Calculate distance from robot to each obstacle
         robot_pos = jnp.array([new_x, new_y])
         distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(robot_pos, state.obstacles)
@@ -173,50 +175,43 @@ class NavigationEnv(environment.Environment):
         return total_reward, goal_reached
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
-        """Reset environment with random obstacles and valid start/goal positions."""
-        # 1. Generate random obstacles
-        key, obs_key = jax.random.split(key)
-        obstacles = generate_obstacles(
-            obs_key, params.arena_size, params.num_obstacles, params.min_obstacle_size, params.max_obstacle_size
+        """Reset environment state by sampling a new room layout."""
+        key, room_key, pos_key = jax.random.split(key, 3)
+
+        # Generate the room layout and free positions
+        obstacles, free_positions = generate_room(
+            room_key, params.arena_size, params.grid_size, params.target_carved_percent
         )
 
-        # 2. Sample valid positions for robot and goal
-        key, pos_key = jax.random.split(key)
-        clearance = 2.0 * params.robot_radius
-        robot_pos, goal_pos = sample_valid_positions(pos_key, obstacles, params.arena_size, clearance)
+        # Sample positions for robot and goal
+        robot_pos, goal_pos = sample_positions(pos_key, free_positions)
 
-        # 3. Random orientation
-        start_theta = jax.random.uniform(key, shape=(), minval=-jnp.pi, maxval=jnp.pi)
+        # Randomly initialize robot orientation
+        key, subkey = jax.random.split(key)
+        robot_angle = jax.random.uniform(subkey, minval=0, maxval=2 * jnp.pi)
 
-        # 4. Create initial state
+        # Create initial state
         state = EnvState(
             x=robot_pos[0],
             y=robot_pos[1],
-            theta=start_theta,
+            theta=robot_angle,
             goal_x=goal_pos[0],
             goal_y=goal_pos[1],
             obstacles=obstacles,
+            lidar_distances=jnp.zeros(params.lidar_num_beams),
+            lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
             time=0,
             terminal=jnp.array(False),
             accumulated_reward=jnp.array(0.0),
-            lidar_distances=jnp.zeros(params.lidar_num_beams),
-            lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
         )
 
-        # 5. Initialize lidar readings
-        lidar_distances, collision_types = simulate_lidar(
-            state.x, state.y, state.theta, obstacles, goal_pos[0], goal_pos[1], params
-        )
+        # Get initial observation
+        obs = self._get_obs(state, params)
 
-        state = state.replace(
-            lidar_distances=lidar_distances,
-            lidar_collision_types=collision_types,
-        )
-
-        return self._get_obs(state, params), state
+        return obs, state
 
     def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Convert state to observation vector [x, y, sin(θ), cos(θ), goal_x, goal_y, dist, angle, lidar_dist..., lidar_goal...]."""
+        """Convert state to observation vector."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
 
@@ -310,7 +305,7 @@ class NavigationEnv(environment.Environment):
 
     @property
     def name(self) -> str:
-        return "DifferentialDriveEnv-v0"
+        return "DifferentialDriveEnv-v1"
 
     @property
     def num_actions(self) -> int:
