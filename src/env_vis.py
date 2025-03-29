@@ -10,12 +10,6 @@ from PIL import Image, ImageDraw, ImageFont
 from env import EnvParams, EnvState
 from lidar import Collision
 
-# Robot dimensions
-ROBOT_LENGTH = 0.3
-ROBOT_WIDTH = 0.2
-WHEEL_LENGTH = 0.15
-WHEEL_WIDTH = 0.05
-
 # Type alias for RGB color values
 RGBColor = Tuple[int, int, int]
 
@@ -64,6 +58,49 @@ def get_polygon_pixels(
         for (lx, ly) in corners
         for (px, py) in [rotate_point(lx, ly, angle)]
     ]
+
+
+def get_robot_dimensions(robot_radius: float) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+    """Calculate robot chassis and wheel dimensions based on robot radius.
+
+    Returns:
+        Tuple containing:
+        - List of chassis corner points
+        - List of wheel corner points for each wheel
+    """
+    # Chassis dimensions: 80% of diameter for length, 60% for width
+    chassis_length = robot_radius * 1.6  # 80% of diameter
+    chassis_width = robot_radius * 1.2  # 60% of diameter
+
+    # Wheel dimensions: 40% of chassis length, 20% of chassis width
+    wheel_length = chassis_length * 0.4
+    wheel_width = chassis_width * 0.2
+
+    # Chassis corners (centered at origin)
+    chassis = [
+        (chassis_length / 2, chassis_width / 2),
+        (-chassis_length / 2, chassis_width / 2),
+        (-chassis_length / 2, -chassis_width / 2),
+        (chassis_length / 2, -chassis_width / 2),
+    ]
+
+    # Wheel corners (centered at origin)
+    wheels = [
+        [
+            (wheel_length / 2, chassis_width / 2 + wheel_width / 2),
+            (-wheel_length / 2, chassis_width / 2 + wheel_width / 2),
+            (-wheel_length / 2, chassis_width / 2 - wheel_width / 2),
+            (wheel_length / 2, chassis_width / 2 - wheel_width / 2),
+        ],
+        [
+            (wheel_length / 2, -chassis_width / 2 + wheel_width / 2),
+            (-wheel_length / 2, -chassis_width / 2 + wheel_width / 2),
+            (-wheel_length / 2, -chassis_width / 2 - wheel_width / 2),
+            (wheel_length / 2, -chassis_width / 2 - wheel_width / 2),
+        ],
+    ]
+
+    return chassis, wheels
 
 
 def render_frame(
@@ -130,30 +167,13 @@ def render_frame(
         end = world_to_pixels(x_np + d * dx, y_np + d * dy, scale, high_height)
         draw.line([start, end], fill=color, width=max(1, int(0.5 * AA_SCALE)))
 
+    # Get robot dimensions based on radius
+    chassis, wheels = get_robot_dimensions(params.robot_radius)
+
     # Draw robot chassis
-    chassis = [
-        (ROBOT_LENGTH / 2, ROBOT_WIDTH / 2),
-        (-ROBOT_LENGTH / 2, ROBOT_WIDTH / 2),
-        (-ROBOT_LENGTH / 2, -ROBOT_WIDTH / 2),
-        (ROBOT_LENGTH / 2, -ROBOT_WIDTH / 2),
-    ]
     draw.polygon(get_polygon_pixels(chassis, x_np, y_np, theta_np, scale, high_height), fill=theme.chassis)
 
     # Draw wheels
-    wheels = [
-        [
-            (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-            (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-            (-WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-            (WHEEL_LENGTH / 2, ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-        ],
-        [
-            (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-            (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 + WHEEL_WIDTH / 2),
-            (-WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-            (WHEEL_LENGTH / 2, -ROBOT_WIDTH / 2 - WHEEL_WIDTH / 2),
-        ],
-    ]
     for wheel in wheels:
         draw.polygon(get_polygon_pixels(wheel, x_np, y_np, theta_np, scale, high_height), fill=theme.wheel)
 
