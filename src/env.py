@@ -6,8 +6,8 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 
+from geometry import generate_obstacles, point_to_rectangle_distance, sample_valid_positions
 from lidar import Collision, simulate_lidar
-from utils import generate_obstacles, point_to_rectangle_distance, sample_valid_positions
 
 
 @struct.dataclass
