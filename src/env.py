@@ -1,10 +1,12 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Union
 
 import chex
 import jax
 import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
+
+from constants import GOAL, MAX_DIST, OBSTACLE, WALL
 
 
 def is_in_obstacle(x: jnp.ndarray, y: jnp.ndarray, obstacles: jnp.ndarray) -> jnp.ndarray:
@@ -62,12 +64,12 @@ def compute_wall_distance(
     x: jnp.ndarray, y: jnp.ndarray, dx: jnp.ndarray, dy: jnp.ndarray, arena_size: float
 ) -> jnp.ndarray:
     # Compute t for each wall; if direction component is near zero, use a large number.
-    t_x = jnp.where(dx > 1e-6, (arena_size - x) / dx, jnp.where(dx < -1e-6, (0.0 - x) / dx, jnp.inf))
-    t_y = jnp.where(dy > 1e-6, (arena_size - y) / dy, jnp.where(dy < -1e-6, (0.0 - y) / dy, jnp.inf))
+    t_x = jnp.where(jnp.abs(dx) > 1e-6, jnp.where(dx > 0, (arena_size - x) / dx, -x / dx), jnp.inf)
+    t_y = jnp.where(jnp.abs(dy) > 1e-6, jnp.where(dy > 0, (arena_size - y) / dy, -y / dy), jnp.inf)
     # Only positive intersections matter.
     t_candidates = jnp.array([t_x, t_y])
     t_candidates = jnp.where(t_candidates > 0, t_candidates, jnp.inf)
-    return jnp.minimum(t_candidates[0], t_candidates[1])
+    return jnp.min(t_candidates)
 
 
 def compute_obstacle_distance(
@@ -80,23 +82,14 @@ def compute_obstacle_distance(
     """
     # For numerical stability, add small epsilon to denominator.
     eps = 1e-6
-    # Expand x,y and direction to shape (num_obstacles,)
-    ox = obstacles[:, 0]
-    oy = obstacles[:, 1]
-    ow = obstacles[:, 2]
-    oh = obstacles[:, 3]
+    # Extract obstacle coordinates
+    ox, oy, ow, oh = obstacles[:, 0], obstacles[:, 1], obstacles[:, 2], obstacles[:, 3]
 
-    # Compute t for x slabs.
-    t1 = (ox - x) / (dx + eps)
-    t2 = ((ox + ow) - x) / (dx + eps)
-    t_min_x = jnp.minimum(t1, t2)
-    t_max_x = jnp.maximum(t1, t2)
-
-    # Compute t for y slabs.
-    t3 = (oy - y) / (dy + eps)
-    t4 = ((oy + oh) - y) / (dy + eps)
-    t_min_y = jnp.minimum(t3, t4)
-    t_max_y = jnp.maximum(t3, t4)
+    # Compute t for x and y slabs
+    t_min_x = jnp.minimum((ox - x) / (dx + eps), ((ox + ow) - x) / (dx + eps))
+    t_max_x = jnp.maximum((ox - x) / (dx + eps), ((ox + ow) - x) / (dx + eps))
+    t_min_y = jnp.minimum((oy - y) / (dy + eps), ((oy + oh) - y) / (dy + eps))
+    t_max_y = jnp.maximum((oy - y) / (dy + eps), ((oy + oh) - y) / (dy + eps))
 
     t_entry = jnp.maximum(t_min_x, t_min_y)
     t_exit = jnp.minimum(t_max_x, t_max_y)
@@ -108,12 +101,52 @@ def compute_obstacle_distance(
     return jnp.min(distances)
 
 
-def simulate_lidar(
-    x: jnp.ndarray, y: jnp.ndarray, theta: jnp.ndarray, obstacles: jnp.ndarray, params: "EnvParams"
+def compute_goal_intersection(
+    x: jnp.ndarray,
+    y: jnp.ndarray,
+    dx: jnp.ndarray,
+    dy: jnp.ndarray,
+    goal_x: jnp.ndarray,
+    goal_y: jnp.ndarray,
+    goal_tolerance: float,
 ) -> jnp.ndarray:
+    """Compute the distance to intersection with the goal (circle)"""
+    # Vector from start to goal center
+    ocx, ocy = x - goal_x, y - goal_y
+
+    # Quadratic equation coefficients for circle intersection
+    b = 2 * (ocx * dx + ocy * dy)
+    c = ocx**2 + ocy**2 - goal_tolerance**2
+    disc = b**2 - 4 * c
+
+    # If discriminant is negative, no intersection
+    t_candidates = jnp.array([jnp.inf, jnp.inf])
+
+    # For valid intersections, compute both t values
+    t1 = (-b - jnp.sqrt(jnp.maximum(0.0, disc))) / 2
+    t2 = (-b + jnp.sqrt(jnp.maximum(0.0, disc))) / 2
+
+    # Only positive t values matter
+    t_candidates = jnp.where(disc >= 0, jnp.where(t1 >= 0, t1, jnp.where(t2 >= 0, t2, jnp.inf)), jnp.inf)
+
+    return t_candidates
+
+
+def simulate_lidar(
+    x: jnp.ndarray,
+    y: jnp.ndarray,
+    theta: jnp.ndarray,
+    obstacles: jnp.ndarray,
+    goal_x: jnp.ndarray,
+    goal_y: jnp.ndarray,
+    params: "EnvParams",
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
     Simulate a lidar sensor.
-    Returns an array of distances of shape (lidar_num_beams,).
+    Returns:
+        - distances: array of shape (lidar_num_beams,) with min distances
+        - collision_types: array of shape (lidar_num_beams,) with collision types
+          (0=max_distance, 1=wall, 2=obstacle, 3=goal)
     """
     num_beams = params.lidar_num_beams
     fov_rad = params.lidar_fov * jnp.pi / 180.0
@@ -121,30 +154,48 @@ def simulate_lidar(
     beam_angles = theta + beam_offsets
 
     def beam_distance(angle):
-        dx = jnp.cos(angle)
-        dy = jnp.sin(angle)
+        dx, dy = jnp.cos(angle), jnp.sin(angle)
         wall_dist = compute_wall_distance(x, y, dx, dy, params.arena_size)
         obs_dist = compute_obstacle_distance(x, y, dx, dy, obstacles)
-        d = jnp.minimum(wall_dist, obs_dist)
-        return jnp.minimum(d, params.lidar_max_distance)
+        goal_dist = compute_goal_intersection(x, y, dx, dy, goal_x, goal_y, params.goal_tolerance)
 
-    lidar_dists = jax.vmap(beam_distance)(beam_angles)
-    return lidar_dists
+        # Compute minimum distance and identify what was hit
+        distances = jnp.array([wall_dist, obs_dist, goal_dist, params.lidar_max_distance])
+        min_idx = jnp.argmin(distances)
+        dist = distances[min_idx]
+
+        # Map index to collision type (wall=1, obstacle=2, goal=3, max_dist=0)
+        collision_type = jnp.where(
+            min_idx == 0, WALL, jnp.where(min_idx == 1, OBSTACLE, jnp.where(min_idx == 2, GOAL, MAX_DIST))
+        )
+
+        return dist, collision_type
+
+    # Apply beam_distance to all angles
+    distances_and_types = jax.vmap(beam_distance)(beam_angles)
+
+    # Unpack the results
+    distances = distances_and_types[0]
+    collision_types = distances_and_types[1]
+
+    return distances, collision_types
 
 
-@struct.dataclass
-class EnvState(environment.EnvState):
+class EnvState(struct.PyTreeNode):
     """Environment state for the differential drive robot."""
 
-    x: chex.Array  # Robot x position
-    y: chex.Array  # Robot y position
-    theta: chex.Array  # Robot orientation (radians)
-    goal_x: chex.Array  # Goal x position
-    goal_y: chex.Array  # Goal y position
+    x: jnp.ndarray  # Robot x position
+    y: jnp.ndarray  # Robot y position
+    theta: jnp.ndarray  # Robot orientation (radians)
+    goal_x: jnp.ndarray  # Goal x position
+    goal_y: jnp.ndarray  # Goal y position
     time: int  # Current timestep
-    terminal: bool  # Episode termination flag
+    terminal: jnp.ndarray  # Episode termination flag (as bool ndarray)
     obstacles: jnp.ndarray  # Obstacles as rows [x, y, w, h]
-    accumulated_reward: float = 0.0  # Total reward
+    accumulated_reward: jnp.ndarray  # Total reward (as float ndarray)
+    # Updated lidar fields
+    lidar_distances: jnp.ndarray = jnp.array([])  # Lidar distances
+    lidar_collision_types: jnp.ndarray = jnp.array([])  # Collision types (0=max_dist, 1=wall, 2=obstacle, 3=goal)
 
 
 @struct.dataclass
@@ -174,7 +225,7 @@ class EnvParams(environment.EnvParams):
     goal_reward: float = 100.0  # bonus for reaching the goal
 
 
-class NavigationEnv(environment.Environment[EnvState, EnvParams]):
+class NavigationEnv(environment.Environment):
     """
     Differential drive robot navigating to a goal with obstacles and a simulated lidar.
 
@@ -192,119 +243,117 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         super().__init__()
 
     @property
-    def default_params(self) -> EnvParams:
+    def default_params(self) -> environment.EnvParams:
         return EnvParams()
 
     def step_env(
         self,
         key: chex.PRNGKey,
         state: EnvState,
-        action: int | float | chex.Array,  # [v_left, v_right]
+        action: Union[chex.Array, int, float],
         params: EnvParams,
-    ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
+    ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
         """Perform a single timestep state transition."""
-
-        # Ensure that action is a 2D array
-        assert isinstance(action, jnp.ndarray) and action.shape == (2,), "Action must be a 2D array."
+        # Ensure action is a 2D array
+        action = jnp.asarray(action, dtype=jnp.float32)
+        assert action.shape == (2,), "Action must be a 2D array."
 
         # --- Compute kinematics ---
         v_left = jnp.clip(action[0], -params.max_wheel_speed, params.max_wheel_speed)
         v_right = jnp.clip(action[1], -params.max_wheel_speed, params.max_wheel_speed)
 
-        # Compute linear and angular velocities
+        # Linear and angular velocities
         v = (v_left + v_right) / 2.0
         omega = (v_right - v_left) / params.wheel_base
 
-        # Compute new position and orientation
-        new_theta = jnp.add(state.theta, omega * params.dt)
+        # Update orientation and position
+        new_theta = state.theta + omega * params.dt
         new_theta = jnp.arctan2(jnp.sin(new_theta), jnp.cos(new_theta))  # Normalize to [-pi, pi]
 
-        # Update position (use jnp.add, jnp.multiply for arithmetic)
-        new_x = jnp.add(state.x, jnp.multiply(v, jnp.multiply(jnp.cos(state.theta), params.dt)))
-        new_y = jnp.add(state.y, jnp.multiply(v, jnp.multiply(jnp.sin(state.theta), params.dt)))
+        dx = v * jnp.cos(state.theta) * params.dt
+        dy = v * jnp.sin(state.theta) * params.dt
+        new_x = state.x + dx
+        new_y = state.y + dy
 
-        # --- Enforce arena boundaries with a sphere collider ---
+        # Enforce arena boundaries
         new_x = jnp.clip(new_x, params.robot_radius, params.arena_size - params.robot_radius)
         new_y = jnp.clip(new_y, params.robot_radius, params.arena_size - params.robot_radius)
 
         # --- Reward calculation ---
-        prev_dist = jnp.sqrt(
-            jnp.add(
-                jnp.power(jnp.subtract(state.x, state.goal_x), 2), jnp.power(jnp.subtract(state.y, state.goal_y), 2)
-            )
-        )
-        new_dist = jnp.sqrt(
-            jnp.add(jnp.power(jnp.subtract(new_x, state.goal_x), 2), jnp.power(jnp.subtract(new_y, state.goal_y), 2))
-        )
-        reward = jnp.subtract(prev_dist, new_dist) - params.step_penalty
+        prev_dist = jnp.sqrt((state.x - state.goal_x) ** 2 + (state.y - state.goal_y) ** 2)
+        new_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
+        reward = prev_dist - new_dist - params.step_penalty
 
-        # --- Check termination (goal reached or time exceeded) ---
+        # --- Check termination conditions ---
         goal_reached = new_dist <= params.goal_tolerance
         time_exceeded = (state.time + 1) >= params.max_steps_in_episode
         done = jnp.logical_or(goal_reached, time_exceeded)
 
         # Apply reward for goal reached
-        reward = jax.lax.select(goal_reached, reward + params.goal_reward, reward)
+        reward = jnp.where(goal_reached, reward + params.goal_reward, reward)
 
-        # --- Collision detection (sphere collider) with obstacles ---
+        # --- Collision detection ---
+        obs_centers_x = state.obstacles[:, 0] + state.obstacles[:, 2] / 2
+        obs_centers_y = state.obstacles[:, 1] + state.obstacles[:, 3] / 2
+        min_dim = jnp.minimum(state.obstacles[:, 2], state.obstacles[:, 3])
+
         collision = jnp.any(
-            jnp.sqrt(
-                jnp.add(
-                    jnp.power(jnp.subtract(new_x, (state.obstacles[:, 0] + state.obstacles[:, 2] / 2)), 2),
-                    jnp.power(jnp.subtract(new_y, (state.obstacles[:, 1] + state.obstacles[:, 3] / 2)), 2),
-                )
-            )
-            < (params.robot_radius + 0.5 * jnp.minimum(state.obstacles[:, 2], state.obstacles[:, 3]))
+            jnp.sqrt((new_x - obs_centers_x) ** 2 + (new_y - obs_centers_y) ** 2)
+            < (params.robot_radius + 0.5 * min_dim)
         )
 
-        # If collision, reset position and apply collision penalty
-        new_x = jax.lax.select(collision, state.x, new_x)
-        new_y = jax.lax.select(collision, state.y, new_y)
-        reward = jax.lax.select(collision, -params.collision_penalty, reward)
-        # Note: collision does not terminate the episode.
+        # If collision, reset position and apply penalty
+        new_x = jnp.where(collision, state.x, new_x)
+        new_y = jnp.where(collision, state.y, new_y)
+        reward = jnp.where(collision, -params.collision_penalty, reward)
+
+        # Simulate lidar for the new state
+        lidar_distances, lidar_collision_types = simulate_lidar(
+            new_x, new_y, new_theta, state.obstacles, state.goal_x, state.goal_y, params
+        )
 
         # Update state
-        state = state.replace(
+        new_state = EnvState(
             x=new_x,
             y=new_y,
             theta=new_theta,
+            goal_x=state.goal_x,
+            goal_y=state.goal_y,
             time=state.time + 1,
             terminal=done,
+            obstacles=state.obstacles,
             accumulated_reward=state.accumulated_reward + reward,
+            lidar_distances=lidar_distances,
+            lidar_collision_types=lidar_collision_types,
         )
 
         # Get observation and return results
-        obs = self.get_obs(state, params)
-        info = {"discount": self.discount(state, params)}
+        obs = self._get_obs(new_state, params)
+        info = {"discount": jnp.where(new_state.terminal, jnp.array(0.0), jnp.array(1.0))}
 
-        return (
-            jax.lax.stop_gradient(obs),
-            jax.lax.stop_gradient(state),
-            reward.astype(jnp.float32),
-            done,
-            info,
-        )
-
-    def discount(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
-        return jax.lax.select(state.terminal, 0.0, 1.0)
+        return obs, new_state, reward, done, info
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment with obstacles and valid start/goal positions."""
         # --- Generate obstacles ---
         num_obs = params.num_obstacles
         key, wh_key, xy_key = jax.random.split(key, 3)
+
+        # Generate obstacle sizes
         wh = jax.random.uniform(wh_key, shape=(num_obs, 2), dtype=jnp.float32)
         wh = params.min_obstacle_size + (params.max_obstacle_size - params.min_obstacle_size) * wh
-        w_obs = wh[:, 0]
-        h_obs = wh[:, 1]
+
+        # Generate obstacle positions
         x_key, y_key = jax.random.split(xy_key)
         x_obs = jax.random.uniform(
-            x_key, shape=(num_obs,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size - w_obs
+            x_key, shape=(num_obs,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size - wh[:, 0]
         )
         y_obs = jax.random.uniform(
-            y_key, shape=(num_obs,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size - h_obs
+            y_key, shape=(num_obs,), dtype=jnp.float32, minval=0.0, maxval=params.arena_size - wh[:, 1]
         )
-        obstacles = jnp.stack([x_obs, y_obs, w_obs, h_obs], axis=1)
+
+        # Stack obstacles [x, y, w, h]
+        obstacles = jnp.stack([x_obs, y_obs, wh[:, 0], wh[:, 1]], axis=1)
 
         # --- Sample valid start and goal positions ---
         start, key = sample_valid_point(key, params.arena_size, obstacles, params.robot_radius)
@@ -312,6 +361,7 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         start_theta = jax.random.uniform(theta_key, shape=(), dtype=jnp.float32, minval=-jnp.pi, maxval=jnp.pi)
         goal, key = sample_valid_point(key, params.arena_size, obstacles, params.robot_radius)
 
+        # Initialize state with empty arrays for lidar arrays, which will be updated
         state = EnvState(
             x=start[0],
             y=start[1],
@@ -319,41 +369,77 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
             goal_x=goal[0],
             goal_y=goal[1],
             time=0,
-            terminal=False,
+            terminal=jnp.array(False),
             obstacles=obstacles,
+            accumulated_reward=jnp.array(0.0),
+            lidar_distances=jnp.zeros(params.lidar_num_beams),
+            lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
         )
-        return self.get_obs(state, params), state
 
-    def get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Return observation: [x, y, cos(theta), sin(theta), goal_x, goal_y, goal_distance, goal_angle, lidar beams]."""
-        base_obs = jnp.array(
-            [state.x, state.y, jnp.cos(state.theta), jnp.sin(state.theta), state.goal_x, state.goal_y],
-            dtype=jnp.float32,
+        # Update lidar readings for initial state
+        lidar_distances, lidar_collision_types = simulate_lidar(
+            state.x, state.y, state.theta, obstacles, goal[0], goal[1], params
         )
-        # Compute dedicated goal sensor readings.
-        goal_dx = jnp.subtract(state.goal_x, state.x)
-        goal_dy = jnp.subtract(state.goal_y, state.y)
+
+        state = state.replace(
+            lidar_distances=lidar_distances,
+            lidar_collision_types=lidar_collision_types,
+        )
+
+        return self._get_obs(state, params), state
+
+    def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+        """Return observation: [x, y, cos(theta), sin(theta), goal_x, goal_y, goal_distance, goal_angle, lidar beams]."""
+        # Base observations
+        cos_theta, sin_theta = jnp.cos(state.theta), jnp.sin(state.theta)
+        base_obs = jnp.array([state.x, state.y, cos_theta, sin_theta, state.goal_x, state.goal_y], dtype=jnp.float32)
+
+        # Goal sensor readings
+        goal_dx = state.goal_x - state.x
+        goal_dy = state.goal_y - state.y
         goal_distance = jnp.sqrt(goal_dx**2 + goal_dy**2)
         goal_angle = jnp.arctan2(goal_dy, goal_dx) - state.theta
         goal_angle = jnp.arctan2(jnp.sin(goal_angle), jnp.cos(goal_angle))  # Normalize to [-pi, pi]
+
         goal_obs = jnp.array([goal_distance, goal_angle], dtype=jnp.float32)
-        lidar_obs = simulate_lidar(state.x, state.y, state.theta, state.obstacles, params)
+
+        # Use precomputed lidar distances
+        lidar_obs = state.lidar_distances
+
         return jnp.concatenate([base_obs, goal_obs, lidar_obs], axis=0)
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space: [x, y, cos(theta), sin(theta), goal_x, goal_y, goal_distance, goal_angle, lidar beams]."""
-        base_low = jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0], dtype=jnp.float32)
-        base_high = jnp.array(
-            [params.arena_size, params.arena_size, 1.0, 1.0, params.arena_size, params.arena_size], dtype=jnp.float32
+        n_dims = 6 + 2 + params.lidar_num_beams
+
+        # Construct low and high bounds
+        low = jnp.concatenate(
+            [
+                jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, -jnp.pi], dtype=jnp.float32),
+                jnp.zeros(params.lidar_num_beams, dtype=jnp.float32),
+            ]
         )
-        goal_low = jnp.array([0.0, -jnp.pi], dtype=jnp.float32)
-        # Maximum goal distance can be diagonal of arena.
-        goal_high = jnp.array([params.arena_size * jnp.sqrt(2), jnp.pi], dtype=jnp.float32)
-        lidar_low = jnp.zeros((params.lidar_num_beams,), dtype=jnp.float32)
-        lidar_high = params.lidar_max_distance * jnp.ones((params.lidar_num_beams,), dtype=jnp.float32)
-        low = jnp.concatenate([base_low, goal_low, lidar_low], axis=0)
-        high = jnp.concatenate([base_high, goal_high, lidar_high], axis=0)
-        return spaces.Box(low, high, (6 + 2 + params.lidar_num_beams,), dtype=jnp.float32)
+
+        high = jnp.concatenate(
+            [
+                jnp.array(
+                    [
+                        params.arena_size,
+                        params.arena_size,
+                        1.0,
+                        1.0,
+                        params.arena_size,
+                        params.arena_size,
+                        params.arena_size * jnp.sqrt(2),
+                        jnp.pi,
+                    ],
+                    dtype=jnp.float32,
+                ),
+                jnp.ones(params.lidar_num_beams, dtype=jnp.float32) * params.lidar_max_distance,
+            ]
+        )
+
+        return spaces.Box(low, high, (n_dims,), dtype=jnp.float32)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         return jnp.logical_or(state.terminal, state.time >= params.max_steps_in_episode)
