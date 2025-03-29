@@ -7,6 +7,39 @@ import jax
 import jax.numpy as jnp
 
 
+def point_to_rectangle_distance(point: jnp.ndarray, rect: jnp.ndarray) -> jnp.ndarray:
+    """Calculate minimum distance from a point to a rectangle.
+
+    Args:
+        point: Point coordinates [x, y]
+        rect: Rectangle coordinates [x, y, width, height]
+
+    Returns:
+        Minimum distance from point to rectangle
+    """
+    # Extract rectangle coordinates and dimensions
+    rect_x, rect_y, rect_w, rect_h = rect
+
+    # Calculate rectangle corners
+    rect_x_min, rect_y_min = rect_x, rect_y
+    rect_x_max, rect_y_max = rect_x + rect_w, rect_y + rect_h
+
+    # Find closest point on rectangle to the query point
+    closest_x = jnp.clip(point[0], rect_x_min, rect_x_max)
+    closest_y = jnp.clip(point[1], rect_y_min, rect_y_max)
+
+    # If point is inside the rectangle, distance is 0
+    inside = (closest_x == point[0]) & (closest_y == point[1])
+
+    # Calculate distance to closest point
+    dx = closest_x - point[0]
+    dy = closest_y - point[1]
+    distance = jnp.sqrt(dx**2 + dy**2)
+
+    # Return 0 if inside, otherwise the calculated distance
+    return jnp.where(inside, 0.0, distance)
+
+
 def sample_valid_positions(
     key: chex.PRNGKey, obstacles: jnp.ndarray, arena_size: float, clearance: float
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -30,16 +63,11 @@ def sample_valid_positions(
 
     goal_samples = jax.random.uniform(key_goal, shape=(10, 2), minval=buffer, maxval=arena_size - buffer)
 
-    # Calculate obstacle centers and radii
-    obstacle_centers = obstacles[:, :2] + obstacles[:, 2:] / 2
-    obstacle_radii = jnp.minimum(obstacles[:, 2], obstacles[:, 3]) / 2
-
     # Function to check if a position is valid
     def is_valid_position(pos):
-        # Use broadcasting to calculate distances to all obstacles at once
-        deltas = pos - obstacle_centers  # Shape: (num_obstacles, 2)
-        distances = jnp.sqrt(jnp.sum(deltas**2, axis=1))  # Shape: (num_obstacles,)
-        return jnp.all(distances >= (obstacle_radii + clearance))
+        # Calculate distance to each obstacle
+        distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(pos, obstacles)
+        return jnp.all(distances >= clearance)
 
     # Vectorize the validation function over all robot positions
     check_batch = jax.vmap(is_valid_position)

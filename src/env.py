@@ -7,7 +7,7 @@ from flax import struct
 from gymnax.environments import environment, spaces
 
 from lidar import simulate_lidar
-from utils import generate_obstacles, sample_valid_positions
+from utils import generate_obstacles, point_to_rectangle_distance, sample_valid_positions
 
 
 @struct.dataclass
@@ -105,15 +105,11 @@ class NavigationEnv(environment.Environment):
         new_x = jnp.clip(state.x + dx, params.robot_radius, params.arena_size - params.robot_radius)
         new_y = jnp.clip(state.y + dy, params.robot_radius, params.arena_size - params.robot_radius)
 
-        # 2. Collision detection
-        # Compute distances to obstacle centers
-        obs_center_x = state.obstacles[:, 0] + state.obstacles[:, 2] / 2
-        obs_center_y = state.obstacles[:, 1] + state.obstacles[:, 3] / 2
-        min_dim = jnp.minimum(state.obstacles[:, 2], state.obstacles[:, 3]) / 2
-
-        # Check if any obstacle is too close
-        dists = jnp.sqrt((new_x - obs_center_x) ** 2 + (new_y - obs_center_y) ** 2)
-        collision = jnp.any(dists < (params.robot_radius + min_dim))
+        # 2. Collision detection with accurate rectangle distance
+        # Calculate distance from robot to each obstacle
+        robot_pos = jnp.array([new_x, new_y])
+        distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(robot_pos, state.obstacles)
+        collision = jnp.any(distances < params.robot_radius)
 
         # On collision: stay in place and get penalty
         new_x = jnp.where(collision, state.x, new_x)
