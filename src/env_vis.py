@@ -15,7 +15,7 @@ RGBColor = Tuple[int, int, int]
 
 
 @dataclass
-class VisualizationTheme:
+class Theme:
     """Theme configuration for environment visualization"""
 
     background: RGBColor = (255, 255, 255)
@@ -30,6 +30,10 @@ class VisualizationTheme:
 
 
 Frame = np.ndarray
+"""Type alias for a single frame of the environment visualization"""
+
+Point = Tuple[float, float]
+"""Type alias for a 2D point in the environment"""
 
 
 def render_frame(
@@ -37,28 +41,27 @@ def render_frame(
     params: EnvParams,
     img_width: int = 600,
     img_height: int = 600,
-    theme: VisualizationTheme = VisualizationTheme(),
+    theme: Theme = Theme(),
     aa_scale: int = 4,
 ) -> Frame:
     """Render a frame of the environment state"""
     # Create high-resolution image for antialiasing
-    high_width, high_height = img_width * aa_scale, img_height * aa_scale
-    img = Image.new("RGB", (high_width, high_height), color=theme.background)
+    aa_width, aa_height = img_width * aa_scale, img_height * aa_scale
+
+    img = Image.new("RGB", (aa_width, aa_height), color=theme.background)
     draw = ImageDraw.Draw(img)
     font = ImageFont.load_default(size=12 * aa_scale)
-    scale = min(high_width, high_height) / params.arena_size
+    scale = min(aa_width, aa_height) / params.arena_size
 
     # Convert state fields to numpy for visualization
-    x_np = float(state.x)
-    y_np = float(state.y)
-    theta_np = float(state.theta)
-    goal_x_np = float(state.goal_x)
-    goal_y_np = float(state.goal_y)
-    obstacles_np = np.array(state.obstacles) if state.obstacles is not None else np.empty((0, 4))
+    x, y = float(state.x), float(state.y)
+    theta = float(state.theta)
+    goal_x, goal_y = float(state.goal_x), float(state.goal_y)
+    obstacles = np.array(state.obstacles)
 
     # Draw environment elements
-    _draw_obstacles(draw, obstacles_np, scale, high_height, theme)
-    _draw_goal(draw, goal_x_np, goal_y_np, params.goal_tolerance, scale, high_height, theme)
+    _draw_obstacles(draw, obstacles, scale, aa_height, theme)
+    _draw_goal(draw, (goal_x, goal_y), params.goal_tolerance, scale, aa_height, theme)
 
     # Draw lidar beams
     _draw_lidar(
@@ -67,16 +70,17 @@ def render_frame(
         params.lidar_fov,
         params.lidar_num_beams,
         scale,
-        high_height,
+        aa_height,
         aa_scale,
         theme,
     )
 
-    # Draw robot
-    _draw_robot(draw, x_np, y_np, theta_np, params.robot_radius, scale, high_height, theme)
+    # Draw robot body and wheels
+    _draw_robot(draw, (x, y), theta, params.robot_radius, scale, aa_height, theme)
 
     # Draw info
-    _draw_info(draw, state.time, float(state.accumulated_reward), aa_scale, font, theme)
+    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(state.time)}", fill=theme.text, font=font)
+    draw.text((5 * aa_scale, 20 * aa_scale), f"R: {float(state.accumulated_reward):.2f}", fill=theme.text, font=font)
 
     # Downsample for antialiasing
     return np.array(img.resize((img_width, img_height), resample=Image.Resampling.LANCZOS))
@@ -91,13 +95,7 @@ def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float =
         print(f"Error saving GIF: {e}")
 
 
-def _draw_obstacles(
-    draw: ImageDraw.ImageDraw,
-    obstacles: np.ndarray,
-    scale: float,
-    img_height: int,
-    theme: VisualizationTheme,
-):
+def _draw_obstacles(draw: ImageDraw.ImageDraw, obstacles: np.ndarray, scale: float, img_height: int, theme: Theme):
     """Draw obstacles in the environment."""
     for ox, oy, ow, oh in obstacles:
         draw.rectangle(
@@ -107,18 +105,13 @@ def _draw_obstacles(
 
 
 def _draw_goal(
-    draw: ImageDraw.ImageDraw,
-    goal_x: float,
-    goal_y: float,
-    goal_tolerance: float,
-    scale: float,
-    img_height: int,
-    theme: VisualizationTheme,
+    draw: ImageDraw.ImageDraw, goal: Point, goal_tolerance: float, scale: float, img_height: int, theme: Theme
 ):
     """Draw the goal point with its tolerance radius."""
+    goal_x, goal_y = goal
     gx, gy = _world_to_pixels(goal_x, goal_y, scale, img_height)
     r = int(goal_tolerance * scale)
-    draw.ellipse([gx - r, gy - r, gx + r, gy + r], fill=theme.goal, width=1)
+    draw.ellipse([gx - r, gy - r, gx + r, gy + r], fill=theme.goal, outline=theme.goal)
 
 
 def _draw_lidar(
@@ -129,7 +122,7 @@ def _draw_lidar(
     scale: float,
     img_height: int,
     aa_scale: int,
-    theme: VisualizationTheme,
+    theme: Theme,
 ):
     """Draw lidar beams with their collision types."""
     fov_rad = np.radians(lidar_fov)
@@ -141,30 +134,36 @@ def _draw_lidar(
         collision_type = state.lidar_collision_types[i]
 
         # Determine beam color based on collision type
-        if collision_type == Collision.Goal:
-            color = theme.goal_beam
-        elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
-            color = theme.wall_beam
-        else:
-            color = theme.default_beam
+        color = _get_beam_color(Collision(collision_type), theme)
 
         # Draw the beam
-        start = _world_to_pixels(float(state.x), float(state.y), scale, img_height)
-        end = _world_to_pixels(float(state.x) + d * dx, float(state.y) + d * dy, scale, img_height)
+        x, y = float(state.x), float(state.y)
+        start = _world_to_pixels(x, y, scale, img_height)
+        end = _world_to_pixels(x + d * dx, y + d * dy, scale, img_height)
         draw.line([start, end], fill=color, width=max(1, int(0.5 * aa_scale)))
+
+
+def _get_beam_color(collision_type: Collision, theme: Theme) -> RGBColor:
+    """Get the color for a lidar beam based on its collision type"""
+    if collision_type == Collision.Goal:
+        return theme.goal_beam
+    elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
+        return theme.wall_beam
+    else:
+        return theme.default_beam
 
 
 def _draw_robot(
     draw: ImageDraw.ImageDraw,
-    x: float,
-    y: float,
+    pos: Point,
     theta: float,
     robot_radius: float,
     scale: float,
     img_height: int,
-    theme: VisualizationTheme,
+    theme: Theme,
 ):
     """Draw the robot chassis and wheels."""
+    x, y = pos
     chassis, wheels = _get_robot_dimensions(robot_radius)
 
     # Draw robot chassis
@@ -175,20 +174,7 @@ def _draw_robot(
         draw.polygon(_get_polygon_pixels(wheel, x, y, theta, scale, img_height), fill=theme.wheel)
 
 
-def _draw_info(
-    draw: ImageDraw.ImageDraw,
-    time: int,
-    reward: float,
-    aa_scale: int,
-    font: ImageFont.FreeTypeFont,
-    theme: VisualizationTheme,
-):
-    """Draw time and reward information."""
-    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(time)}", fill=theme.text, font=font)
-    draw.text((5 * aa_scale, 20 * aa_scale), f"R: {reward:.2f}", fill=theme.text, font=font)
-
-
-def _get_robot_dimensions(robot_radius: float) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+def _get_robot_dimensions(robot_radius: float) -> Tuple[List[Point], List[List[Point]]]:
     """Calculate robot chassis and wheel dimensions based on robot radius.
 
     Returns:
@@ -196,7 +182,7 @@ def _get_robot_dimensions(robot_radius: float) -> Tuple[List[Tuple[float, float]
         - List of chassis corner points
         - List of wheel corner points for each wheel
     """
-    # Chassis dimensions: 80% of diameter for length, 60% for width
+    # Chassis dimensions: 80% of diameter for length, 60% of diameter for width
     chassis_length = robot_radius * 1.6  # 80% of diameter
     chassis_width = robot_radius * 1.2  # 60% of diameter
 
@@ -236,14 +222,14 @@ def _world_to_pixels(x: float, y: float, scale: float, img_height: int) -> Tuple
     return int(x * scale), int(img_height - y * scale)
 
 
-def _rotate_point(x: float, y: float, angle: float) -> Tuple[float, float]:
+def _rotate_point(x: float, y: float, angle: float) -> Point:
     """Rotate a point around the origin by the given angle"""
     ca, sa = np.cos(angle), np.sin(angle)
     return x * ca - y * sa, x * sa + y * ca
 
 
 def _get_polygon_pixels(
-    corners: List[Tuple[float, float]], cx: float, cy: float, angle: float, scale: float, img_height: int
+    corners: List[Point], cx: float, cy: float, angle: float, scale: float, img_height: int
 ) -> List[Tuple[int, int]]:
     """Convert a polygon in world coordinates to pixel coordinates"""
     return [
