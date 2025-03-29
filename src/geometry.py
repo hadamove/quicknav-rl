@@ -1,4 +1,8 @@
-"""Utilities for sampling valid positions in navigation environments."""
+"""Geometry utility functions for the navigation environment.
+
+This module provides functions to calculate distances between points and rectangles,
+and sample valid positions for the robot and goal in the environment.
+"""
 
 from typing import Tuple
 

@@ -1,3 +1,5 @@
+"""Visualization utilities for the environment state"""
+
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
