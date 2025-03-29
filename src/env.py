@@ -116,17 +116,7 @@ class NavigationEnv(environment.Environment):
         new_y = jnp.where(collision, state.y, new_y)
 
         # 3. Reward calculation
-        prev_dist = jnp.sqrt((state.x - state.goal_x) ** 2 + (state.y - state.goal_y) ** 2)
-        new_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
-        goal_reached = new_dist <= params.goal_tolerance
-
-        # Compute reward components
-        progress_reward = prev_dist - new_dist
-        collision_reward = jnp.where(collision, -params.collision_penalty, 0.0)
-        goal_reward = jnp.where(goal_reached, params.goal_reward, 0.0)
-        step_penalty = -params.step_penalty
-
-        reward = progress_reward + collision_reward + goal_reward + step_penalty
+        reward, goal_reached = self._calculate_reward(state, new_x, new_y, collision, params)
 
         # 4. Terminal state check
         out_of_time = state.time + 1 >= params.max_steps_in_episode
@@ -157,6 +147,30 @@ class NavigationEnv(environment.Environment):
         info = {"discount": jnp.where(done, 0.0, 1.0)}
 
         return obs, new_state, reward, done, info
+
+    def _calculate_reward(
+        self,
+        state: EnvState,
+        new_x: jnp.ndarray,
+        new_y: jnp.ndarray,
+        collision: jnp.ndarray,
+        params: EnvParams,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """Calculate reward and check if goal is reached."""
+        # Calculate distance to goal before and after movement
+        prev_dist = jnp.sqrt((state.x - state.goal_x) ** 2 + (state.y - state.goal_y) ** 2)
+        new_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
+        goal_reached = new_dist <= params.goal_tolerance
+
+        # Compute reward components
+        progress_reward = prev_dist - new_dist
+        collision_reward = jnp.where(collision, -params.collision_penalty, 0.0)
+        goal_reward = jnp.where(goal_reached, params.goal_reward, 0.0)
+        step_penalty = -params.step_penalty
+
+        total_reward = progress_reward + collision_reward + goal_reward + step_penalty
+
+        return total_reward, goal_reached
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment with random obstacles and valid start/goal positions."""
