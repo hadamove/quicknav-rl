@@ -41,7 +41,6 @@ def render_frame(
     aa_scale: int = 4,
 ) -> Frame:
     """Render a frame of the environment state"""
-
     # Create high-resolution image for antialiasing
     high_width, high_height = img_width * aa_scale, img_height * aa_scale
     img = Image.new("RGB", (high_width, high_height), color=theme.background)
@@ -57,59 +56,27 @@ def render_frame(
     goal_y_np = float(state.goal_y)
     obstacles_np = np.array(state.obstacles) if state.obstacles is not None else np.empty((0, 4))
 
-    # Draw obstacles
-    for ox, oy, ow, oh in obstacles_np:
-        draw.rectangle(
-            [_world_to_pixels(ox, oy + oh, scale, high_height), _world_to_pixels(ox + ow, oy, scale, high_height)],
-            fill=theme.obstacle,
-        )
+    # Draw environment elements
+    _draw_obstacles(draw, obstacles_np, scale, high_height, theme)
+    _draw_goal(draw, goal_x_np, goal_y_np, params.goal_tolerance, scale, high_height, theme)
 
-    # Draw goal
-    gx, gy = _world_to_pixels(goal_x_np, goal_y_np, scale, high_height)
-    r = int(params.goal_tolerance * scale)
-    draw.ellipse([gx - r, gy - r, gx + r, gy + r], fill=theme.goal, width=1)
+    # Draw lidar beams
+    _draw_lidar(
+        draw,
+        state,
+        params.lidar_fov,
+        params.lidar_num_beams,
+        scale,
+        high_height,
+        aa_scale,
+        theme,
+    )
 
-    # Get lidar data from state
-    lidar_distances = np.array(state.lidar_distances)
-    lidar_collision_types = np.array(state.lidar_collision_types)
+    # Draw robot
+    _draw_robot(draw, x_np, y_np, theta_np, params.robot_radius, scale, high_height, theme)
 
-    # Simulate lidar beams with precomputed distances
-    fov_rad = np.radians(params.lidar_fov)
-    beam_angles = theta_np + np.linspace(-fov_rad / 2, fov_rad / 2, params.lidar_num_beams)
-
-    for i, angle in enumerate(beam_angles):
-        dx, dy = np.cos(angle), np.sin(angle)
-        # Get precomputed distance and collision type
-        d = lidar_distances[i]
-        collision_type = lidar_collision_types[i]
-
-        # Determine beam color based on collision type
-        if collision_type == Collision.Goal:
-            color = theme.goal_beam
-        elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
-            color = theme.wall_beam
-        else:
-            color = theme.default_beam
-
-        # Draw the beam
-        start = _world_to_pixels(x_np, y_np, scale, high_height)
-        end = _world_to_pixels(x_np + d * dx, y_np + d * dy, scale, high_height)
-        draw.line([start, end], fill=color, width=max(1, int(0.5 * aa_scale)))
-
-    # Get robot dimensions based on radius
-    chassis, wheels = _get_robot_dimensions(params.robot_radius)
-
-    # Draw robot chassis
-    draw.polygon(_get_polygon_pixels(chassis, x_np, y_np, theta_np, scale, high_height), fill=theme.chassis)
-
-    # Draw wheels
-    for wheel in wheels:
-        draw.polygon(_get_polygon_pixels(wheel, x_np, y_np, theta_np, scale, high_height), fill=theme.wheel)
-
-    # Draw text info
-    reward_val = float(state.accumulated_reward)
-    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(state.time)}", fill=theme.text, font=font)
-    draw.text((5 * aa_scale, 20 * aa_scale), f"R: {reward_val:.2f}", fill=theme.text, font=font)
+    # Draw info
+    _draw_info(draw, state.time, float(state.accumulated_reward), aa_scale, font, theme)
 
     # Downsample for antialiasing
     return np.array(img.resize((img_width, img_height), resample=Image.Resampling.LANCZOS))
@@ -124,19 +91,101 @@ def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float =
         print(f"Error saving GIF: {e}")
 
 
-def create_episode_animation(
-    env_states: List[EnvState],
-    params: EnvParams,
-    filename: str = "episode.gif",
-    width: int = 600,
-    height: int = 600,
-    fps: float = 10,
-    theme: VisualizationTheme = VisualizationTheme(),
+def _draw_obstacles(
+    draw: ImageDraw.ImageDraw,
+    obstacles: np.ndarray,
+    scale: float,
+    img_height: int,
+    theme: VisualizationTheme,
 ):
-    """Create and save an animation of an episode from a list of environment states"""
-    frames = [render_frame(state, params, width, height, theme) for state in env_states]
-    save_gif(frames, filename, 1.0 / fps)
-    return frames
+    """Draw obstacles in the environment."""
+    for ox, oy, ow, oh in obstacles:
+        draw.rectangle(
+            [_world_to_pixels(ox, oy + oh, scale, img_height), _world_to_pixels(ox + ow, oy, scale, img_height)],
+            fill=theme.obstacle,
+        )
+
+
+def _draw_goal(
+    draw: ImageDraw.ImageDraw,
+    goal_x: float,
+    goal_y: float,
+    goal_tolerance: float,
+    scale: float,
+    img_height: int,
+    theme: VisualizationTheme,
+):
+    """Draw the goal point with its tolerance radius."""
+    gx, gy = _world_to_pixels(goal_x, goal_y, scale, img_height)
+    r = int(goal_tolerance * scale)
+    draw.ellipse([gx - r, gy - r, gx + r, gy + r], fill=theme.goal, width=1)
+
+
+def _draw_lidar(
+    draw: ImageDraw.ImageDraw,
+    state: EnvState,
+    lidar_fov: float,
+    lidar_num_beams: int,
+    scale: float,
+    img_height: int,
+    aa_scale: int,
+    theme: VisualizationTheme,
+):
+    """Draw lidar beams with their collision types."""
+    fov_rad = np.radians(lidar_fov)
+    beam_angles = float(state.theta) + np.linspace(-fov_rad / 2, fov_rad / 2, lidar_num_beams)
+
+    for i, angle in enumerate(beam_angles):
+        dx, dy = np.cos(angle), np.sin(angle)
+        d = float(state.lidar_distances[i])
+        collision_type = state.lidar_collision_types[i]
+
+        # Determine beam color based on collision type
+        if collision_type == Collision.Goal:
+            color = theme.goal_beam
+        elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
+            color = theme.wall_beam
+        else:
+            color = theme.default_beam
+
+        # Draw the beam
+        start = _world_to_pixels(float(state.x), float(state.y), scale, img_height)
+        end = _world_to_pixels(float(state.x) + d * dx, float(state.y) + d * dy, scale, img_height)
+        draw.line([start, end], fill=color, width=max(1, int(0.5 * aa_scale)))
+
+
+def _draw_robot(
+    draw: ImageDraw.ImageDraw,
+    x: float,
+    y: float,
+    theta: float,
+    robot_radius: float,
+    scale: float,
+    img_height: int,
+    theme: VisualizationTheme,
+):
+    """Draw the robot chassis and wheels."""
+    chassis, wheels = _get_robot_dimensions(robot_radius)
+
+    # Draw robot chassis
+    draw.polygon(_get_polygon_pixels(chassis, x, y, theta, scale, img_height), fill=theme.chassis)
+
+    # Draw wheels
+    for wheel in wheels:
+        draw.polygon(_get_polygon_pixels(wheel, x, y, theta, scale, img_height), fill=theme.wheel)
+
+
+def _draw_info(
+    draw: ImageDraw.ImageDraw,
+    time: int,
+    reward: float,
+    aa_scale: int,
+    font: ImageFont.FreeTypeFont,
+    theme: VisualizationTheme,
+):
+    """Draw time and reward information."""
+    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(time)}", fill=theme.text, font=font)
+    draw.text((5 * aa_scale, 20 * aa_scale), f"R: {reward:.2f}", fill=theme.text, font=font)
 
 
 def _get_robot_dimensions(robot_radius: float) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
