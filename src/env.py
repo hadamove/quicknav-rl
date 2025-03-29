@@ -1,5 +1,4 @@
-import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import chex
 import jax
@@ -59,7 +58,9 @@ def sphere_collision(x: jnp.ndarray, y: jnp.ndarray, obstacles: jnp.ndarray, rob
     return jnp.any(dist < robot_radius)
 
 
-def compute_wall_distance(x: float, y: float, dx: float, dy: float, arena_size: float) -> float:
+def compute_wall_distance(
+    x: jnp.ndarray, y: jnp.ndarray, dx: jnp.ndarray, dy: jnp.ndarray, arena_size: float
+) -> jnp.ndarray:
     # Compute t for each wall; if direction component is near zero, use a large number.
     t_x = jnp.where(dx > 1e-6, (arena_size - x) / dx, jnp.where(dx < -1e-6, (0.0 - x) / dx, jnp.inf))
     t_y = jnp.where(dy > 1e-6, (arena_size - y) / dy, jnp.where(dy < -1e-6, (0.0 - y) / dy, jnp.inf))
@@ -69,7 +70,9 @@ def compute_wall_distance(x: float, y: float, dx: float, dy: float, arena_size: 
     return jnp.minimum(t_candidates[0], t_candidates[1])
 
 
-def compute_obstacle_distance(x: float, y: float, dx: float, dy: float, obstacles: jnp.ndarray) -> float:
+def compute_obstacle_distance(
+    x: jnp.ndarray, y: jnp.ndarray, dx: jnp.ndarray, dy: jnp.ndarray, obstacles: jnp.ndarray
+) -> jnp.ndarray:
     """
     For each obstacle, compute intersection distance via the slab method.
     obstacles: shape (n, 4) with rows [ox, oy, w, h]
@@ -105,7 +108,9 @@ def compute_obstacle_distance(x: float, y: float, dx: float, dy: float, obstacle
     return jnp.min(distances)
 
 
-def simulate_lidar(x: float, y: float, theta: float, obstacles: jnp.ndarray, params: "EnvParams") -> jnp.ndarray:
+def simulate_lidar(
+    x: jnp.ndarray, y: jnp.ndarray, theta: jnp.ndarray, obstacles: jnp.ndarray, params: "EnvParams"
+) -> jnp.ndarray:
     """
     Simulate a lidar sensor.
     Returns an array of distances of shape (lidar_num_beams,).
@@ -131,15 +136,15 @@ def simulate_lidar(x: float, y: float, theta: float, obstacles: jnp.ndarray, par
 class EnvState(environment.EnvState):
     """Environment state for the differential drive robot."""
 
-    x: float  # Robot x position
-    y: float  # Robot y position
-    theta: float  # Robot orientation (radians)
-    goal_x: float  # Goal x position
-    goal_y: float  # Goal y position
+    x: chex.Array  # Robot x position
+    y: chex.Array  # Robot y position
+    theta: chex.Array  # Robot orientation (radians)
+    goal_x: chex.Array  # Goal x position
+    goal_y: chex.Array  # Goal y position
     time: int  # Current timestep
     terminal: bool  # Episode termination flag
+    obstacles: jnp.ndarray  # Obstacles as rows [x, y, w, h]
     accumulated_reward: float = 0.0  # Total reward
-    obstacles: Optional[jnp.ndarray] = None  # Obstacles as rows [x, y, w, h]
 
 
 @struct.dataclass
@@ -194,49 +199,71 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         self,
         key: chex.PRNGKey,
         state: EnvState,
-        action: chex.Array,  # [v_left, v_right]
+        action: int | float | chex.Array,  # [v_left, v_right]
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[Any, Any]]:
         """Perform a single timestep state transition."""
+
+        # Ensure that action is a 2D array
+        assert isinstance(action, jnp.ndarray) and action.shape == (2,), "Action must be a 2D array."
+
         # --- Compute kinematics ---
         v_left = jnp.clip(action[0], -params.max_wheel_speed, params.max_wheel_speed)
         v_right = jnp.clip(action[1], -params.max_wheel_speed, params.max_wheel_speed)
+
+        # Compute linear and angular velocities
         v = (v_left + v_right) / 2.0
         omega = (v_right - v_left) / params.wheel_base
 
-        new_theta = state.theta + omega * params.dt
-        new_theta = jnp.arctan2(jnp.sin(new_theta), jnp.cos(new_theta))
-        new_x = state.x + v * jnp.cos(state.theta) * params.dt
-        new_y = state.y + v * jnp.sin(state.theta) * params.dt
+        # Compute new position and orientation
+        new_theta = jnp.add(state.theta, omega * params.dt)
+        new_theta = jnp.arctan2(jnp.sin(new_theta), jnp.cos(new_theta))  # Normalize to [-pi, pi]
+
+        # Update position (use jnp.add, jnp.multiply for arithmetic)
+        new_x = jnp.add(state.x, jnp.multiply(v, jnp.multiply(jnp.cos(state.theta), params.dt)))
+        new_y = jnp.add(state.y, jnp.multiply(v, jnp.multiply(jnp.sin(state.theta), params.dt)))
 
         # --- Enforce arena boundaries with a sphere collider ---
         new_x = jnp.clip(new_x, params.robot_radius, params.arena_size - params.robot_radius)
         new_y = jnp.clip(new_y, params.robot_radius, params.arena_size - params.robot_radius)
 
         # --- Reward calculation ---
-        prev_dist = jnp.sqrt((state.x - state.goal_x) ** 2 + (state.y - state.goal_y) ** 2)
-        new_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
-        reward = prev_dist - new_dist - params.step_penalty
+        prev_dist = jnp.sqrt(
+            jnp.add(
+                jnp.power(jnp.subtract(state.x, state.goal_x), 2), jnp.power(jnp.subtract(state.y, state.goal_y), 2)
+            )
+        )
+        new_dist = jnp.sqrt(
+            jnp.add(jnp.power(jnp.subtract(new_x, state.goal_x), 2), jnp.power(jnp.subtract(new_y, state.goal_y), 2))
+        )
+        reward = jnp.subtract(prev_dist, new_dist) - params.step_penalty
 
         # --- Check termination (goal reached or time exceeded) ---
         goal_reached = new_dist <= params.goal_tolerance
         time_exceeded = (state.time + 1) >= params.max_steps_in_episode
         done = jnp.logical_or(goal_reached, time_exceeded)
+
+        # Apply reward for goal reached
         reward = jax.lax.select(goal_reached, reward + params.goal_reward, reward)
 
         # --- Collision detection (sphere collider) with obstacles ---
         collision = jnp.any(
             jnp.sqrt(
-                (new_x - (state.obstacles[:, 0] + state.obstacles[:, 2] / 2)) ** 2
-                + (new_y - (state.obstacles[:, 1] + state.obstacles[:, 3] / 2)) ** 2
+                jnp.add(
+                    jnp.power(jnp.subtract(new_x, (state.obstacles[:, 0] + state.obstacles[:, 2] / 2)), 2),
+                    jnp.power(jnp.subtract(new_y, (state.obstacles[:, 1] + state.obstacles[:, 3] / 2)), 2),
+                )
             )
             < (params.robot_radius + 0.5 * jnp.minimum(state.obstacles[:, 2], state.obstacles[:, 3]))
         )
+
+        # If collision, reset position and apply collision penalty
         new_x = jax.lax.select(collision, state.x, new_x)
         new_y = jax.lax.select(collision, state.y, new_y)
         reward = jax.lax.select(collision, -params.collision_penalty, reward)
         # Note: collision does not terminate the episode.
 
+        # Update state
         state = state.replace(
             x=new_x,
             y=new_y,
@@ -245,8 +272,11 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
             terminal=done,
             accumulated_reward=state.accumulated_reward + reward,
         )
+
+        # Get observation and return results
         obs = self.get_obs(state, params)
         info = {"discount": self.discount(state, params)}
+
         return (
             jax.lax.stop_gradient(obs),
             jax.lax.stop_gradient(state),
@@ -294,15 +324,15 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
         )
         return self.get_obs(state, params), state
 
-    def get_obs(self, state: EnvState, params: Optional[EnvParams] = None) -> chex.Array:
+    def get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
         """Return observation: [x, y, cos(theta), sin(theta), goal_x, goal_y, goal_distance, goal_angle, lidar beams]."""
         base_obs = jnp.array(
             [state.x, state.y, jnp.cos(state.theta), jnp.sin(state.theta), state.goal_x, state.goal_y],
             dtype=jnp.float32,
         )
         # Compute dedicated goal sensor readings.
-        goal_dx = state.goal_x - state.x
-        goal_dy = state.goal_y - state.y
+        goal_dx = jnp.subtract(state.goal_x, state.x)
+        goal_dy = jnp.subtract(state.goal_y, state.y)
         goal_distance = jnp.sqrt(goal_dx**2 + goal_dy**2)
         goal_angle = jnp.arctan2(goal_dy, goal_dx) - state.theta
         goal_angle = jnp.arctan2(jnp.sin(goal_angle), jnp.cos(goal_angle))  # Normalize to [-pi, pi]
@@ -336,7 +366,7 @@ class NavigationEnv(environment.Environment[EnvState, EnvParams]):
     def num_actions(self) -> int:
         return 2
 
-    def action_space(self, params: Optional[EnvParams] = None) -> spaces.Box:
+    def action_space(self, params: EnvParams) -> spaces.Box:
         low = jnp.array([-params.max_wheel_speed, -params.max_wheel_speed], dtype=jnp.float32)
         high = jnp.array([params.max_wheel_speed, params.max_wheel_speed], dtype=jnp.float32)
         return spaces.Box(low, high, (2,), dtype=jnp.float32)
