@@ -7,51 +7,78 @@ from flax import struct
 from gymnax.environments import environment, spaces
 
 from lidar import simulate_lidar
+from utils import generate_obstacles, sample_valid_positions
 
 
 @struct.dataclass
 class EnvState(struct.PyTreeNode):
-    """Environment state for the differential drive robot."""
+    """Environment state for the differential drive robot navigation task.
 
-    x: jnp.ndarray  # Robot x position
-    y: jnp.ndarray  # Robot y position
+    Contains all relevant information about the current state of the environment,
+    including robot pose, goal location, obstacles, and sensor readings.
+    """
+
+    # Robot state
+    x: jnp.ndarray  # Robot x position (meters)
+    y: jnp.ndarray  # Robot y position (meters)
     theta: jnp.ndarray  # Robot orientation (radians)
-    goal_x: jnp.ndarray  # Goal x position
-    goal_y: jnp.ndarray  # Goal y position
-    obstacles: jnp.ndarray  # Obstacles [x, y, w, h]
-    time: int = 0  # Current timestep
-    terminal: jnp.ndarray = jnp.array(False)  # Episode termination flag
-    accumulated_reward: jnp.ndarray = jnp.array(0.0)  # Total reward
-    lidar_distances: jnp.ndarray = jnp.array([])  # Lidar readings
-    lidar_collision_types: jnp.ndarray = jnp.array([])  # Beam collision types
+
+    # Goal state
+    goal_x: jnp.ndarray  # Goal x position (meters)
+    goal_y: jnp.ndarray  # Goal y position (meters)
+
+    # Environment elements
+    obstacles: jnp.ndarray  # Obstacle coordinates as [x, y, width, height] array
+
+    # Sensor readings
+    lidar_distances: jnp.ndarray = jnp.array([])  # Distance readings from lidar beams (meters)
+    lidar_collision_types: jnp.ndarray = jnp.array([])  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
+
+    # Episode state
+    time: int = 0  # Current timestep in the episode
+    terminal: jnp.ndarray = jnp.array(False)  # Whether the episode has terminated
+    accumulated_reward: jnp.ndarray = jnp.array(0.0)  # Total reward collected so far
 
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
-    """Environment parameters."""
+    """Parameters for configuring the navigation environment.
 
-    arena_size: float = 5.0  # Arena size (meters)
-    dt: float = 0.1  # Simulation timestep
-    wheel_base: float = 0.5  # Distance between wheels
-    max_wheel_speed: float = 1.0  # Max wheel speed (m/s)
-    robot_radius: float = 0.15  # Robot radius
-    goal_tolerance: float = 0.1  # Goal reach tolerance
+    Defines all configurable aspects of the environment, including physical dimensions,
+    robot characteristics, sensor properties, rewards, and episode parameters.
+    """
+
+    # Robot parameters
+    wheel_base: float = 0.5  # Distance between wheels (meters)
+    max_wheel_speed: float = 1.0  # Maximum speed of each wheel (m/s)
+    robot_radius: float = 0.15  # Radius of the robot for collision detection (meters)
+    dt: float = 0.1  # Simulation timestep (seconds)
+
+    # Environment parameters
+    arena_size: float = 5.0  # Width and height of the square arena (meters)
+    num_obstacles: int = struct.field(pytree_node=False, default=5)  # Number of obstacles in the environment
+    min_obstacle_size: float = 0.3  # Minimum width/height of obstacles (meters)
+    max_obstacle_size: float = 1.0  # Maximum width/height of obstacles (meters)
+
+    # Sensor parameters
     lidar_num_beams: int = struct.field(pytree_node=False, default=32)  # Number of lidar beams
     lidar_fov: float = 120.0  # Lidar field of view (degrees)
-    lidar_max_distance: float = 5.0  # Maximum lidar range
-    num_obstacles: int = struct.field(pytree_node=False, default=5)  # Number of obstacles
-    min_obstacle_size: float = 0.3  # Minimum obstacle size
-    max_obstacle_size: float = 1.0  # Maximum obstacle size
-    step_penalty: float = 0.01  # Penalty per step
-    collision_penalty: float = 5.0  # Collision penalty
-    goal_reward: float = 100.0  # Goal reach reward
-    max_steps_in_episode: int = 200  # Maximum episode length
+    lidar_max_distance: float = 5.0  # Maximum detection range of lidar (meters)
+
+    # Reward parameters
+    goal_tolerance: float = 0.1  # Distance threshold for reaching the goal (meters)
+    step_penalty: float = 0.01  # Small penalty applied at each timestep to encourage efficiency
+    collision_penalty: float = 5.0  # Penalty for colliding with obstacles
+    goal_reward: float = 100.0  # Reward for reaching the goal
+
+    # Episode parameters
+    max_steps_in_episode: int = 200  # Maximum number of steps before episode terminates
 
 
 class NavigationEnv(environment.Environment):
     """Differential drive robot navigating to a goal with obstacles and lidar."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
     @property
@@ -106,9 +133,10 @@ class NavigationEnv(environment.Environment):
         reward = progress_reward + collision_reward + goal_reward + step_penalty
 
         # 4. Terminal state check
-        done = jnp.logical_or(goal_reached, state.time + 1 >= params.max_steps_in_episode)
+        out_of_time = state.time + 1 >= params.max_steps_in_episode
+        done = jnp.logical_or(goal_reached, out_of_time)
 
-        # 5. Lidar simulation - using imported function
+        # 5. Lidar simulation
         lidar_distances, collision_types = simulate_lidar(
             new_x, new_y, new_theta, state.obstacles, state.goal_x, state.goal_y, params
         )
@@ -137,113 +165,20 @@ class NavigationEnv(environment.Environment):
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment with random obstacles and valid start/goal positions."""
         # 1. Generate random obstacles
-        key, obs_key, start_key, goal_key = jax.random.split(key, 4)
-
-        # Sample obstacle sizes and positions
-        wh = jax.random.uniform(
-            obs_key, shape=(params.num_obstacles, 2), minval=params.min_obstacle_size, maxval=params.max_obstacle_size
+        key, obs_key = jax.random.split(key)
+        obstacles = generate_obstacles(
+            obs_key, params.arena_size, params.num_obstacles, params.min_obstacle_size, params.max_obstacle_size
         )
 
-        # Make sure obstacles are within arena
-        xy = jax.random.uniform(
-            jax.random.split(obs_key)[0],
-            shape=(params.num_obstacles, 2),
-            minval=0.0,
-            maxval=params.arena_size - jnp.max(wh),
-        )
+        # 2. Sample valid positions for robot and goal
+        key, pos_key = jax.random.split(key)
+        clearance = 2.0 * params.robot_radius
+        robot_pos, goal_pos = sample_valid_positions(pos_key, obstacles, params.arena_size, clearance)
 
-        # Stack as [x, y, width, height]
-        obstacles = jnp.concatenate([xy, wh], axis=1)
+        # 3. Random orientation
+        start_theta = jax.random.uniform(key, shape=(), minval=-jnp.pi, maxval=jnp.pi)
 
-        # 2. Sample start position with safety check
-        buffer = params.robot_radius * 1.5
-        valid_range = params.arena_size - 2 * buffer
-
-        def is_valid_position(pos, obstacles, radius):
-            """Check if position is clear of obstacles."""
-            obs_center_x = obstacles[:, 0] + obstacles[:, 2] / 2
-            obs_center_y = obstacles[:, 1] + obstacles[:, 3] / 2
-            min_dim = jnp.minimum(obstacles[:, 2], obstacles[:, 3]) / 2
-
-            dists = jnp.sqrt((pos[0] - obs_center_x) ** 2 + (pos[1] - obs_center_y) ** 2)
-            return jnp.all(dists >= (radius + min_dim))
-
-        # Function to find valid robot position
-        def find_valid_position(i, val):
-            key, pos, valid = val
-            new_key, subkey = jax.random.split(key)
-            new_pos = jax.random.uniform(subkey, shape=(2,), minval=buffer, maxval=buffer + valid_range)
-            new_valid = is_valid_position(new_pos, obstacles, params.robot_radius)
-
-            # Update position if we found a valid one and didn't have one before
-            should_update = new_valid & ~valid
-            pos = pos.at[0].set(jnp.where(should_update, new_pos[0], pos[0]))
-            pos = pos.at[1].set(jnp.where(should_update, new_pos[1], pos[1]))
-
-            # Update validity flag
-            valid = jnp.logical_or(valid, new_valid)
-            return (new_key, pos, valid)
-
-        # Try to find valid positions for robot and goal
-        max_attempts = 10
-        init_robot_key, init_goal_key = jax.random.split(start_key)
-
-        # Initial random position for robot
-        robot_pos_init = jax.random.uniform(init_robot_key, shape=(2,), minval=buffer, maxval=buffer + valid_range)
-        robot_valid_init = is_valid_position(robot_pos_init, obstacles, params.robot_radius)
-
-        # Try to find valid robot position
-        robot_key, robot_pos, robot_valid = jax.lax.fori_loop(
-            0, max_attempts, find_valid_position, (init_robot_key, robot_pos_init, robot_valid_init)
-        )
-
-        # Initial random position for goal (with minimum separation from robot)
-        def is_valid_goal_position(pos, robot_pos, obstacles, radius):
-            """Check if goal position is clear of obstacles and not too close to robot."""
-            # Check obstacle clearance
-            obs_center_x = obstacles[:, 0] + obstacles[:, 2] / 2
-            obs_center_y = obstacles[:, 1] + obstacles[:, 3] / 2
-            min_dim = jnp.minimum(obstacles[:, 2], obstacles[:, 3]) / 2
-
-            obs_dists = jnp.sqrt((pos[0] - obs_center_x) ** 2 + (pos[1] - obs_center_y) ** 2)
-            clear_of_obstacles = jnp.all(obs_dists >= (radius + min_dim))
-
-            # Check minimum separation from robot (at least 4x robot radius)
-            robot_dist = jnp.sqrt((pos[0] - robot_pos[0]) ** 2 + (pos[1] - robot_pos[1]) ** 2)
-            min_separation = 4.0 * params.robot_radius  # Minimum distance between robot and goal
-            away_from_robot = robot_dist >= min_separation
-
-            return clear_of_obstacles & away_from_robot
-
-        # Find a valid goal position
-        def find_valid_goal(i, val):
-            key, pos, valid = val
-            new_key, subkey = jax.random.split(key)
-            new_pos = jax.random.uniform(subkey, shape=(2,), minval=buffer, maxval=buffer + valid_range)
-            new_valid = is_valid_goal_position(new_pos, robot_pos, obstacles, params.goal_tolerance)
-
-            # Update position if we found a valid one and didn't have one before
-            should_update = new_valid & ~valid
-            pos = pos.at[0].set(jnp.where(should_update, new_pos[0], pos[0]))
-            pos = pos.at[1].set(jnp.where(should_update, new_pos[1], pos[1]))
-
-            # Update validity flag
-            valid = jnp.logical_or(valid, new_valid)
-            return (new_key, pos, valid)
-
-        # Initial random position for goal
-        goal_pos_init = jax.random.uniform(init_goal_key, shape=(2,), minval=buffer, maxval=buffer + valid_range)
-        goal_valid_init = is_valid_goal_position(goal_pos_init, robot_pos, obstacles, params.goal_tolerance)
-
-        # Try to find valid goal position
-        goal_key, goal_pos, goal_valid = jax.lax.fori_loop(
-            0, max_attempts, find_valid_goal, (init_goal_key, goal_pos_init, goal_valid_init)
-        )
-
-        # Random orientation
-        start_theta = jax.random.uniform(jax.random.split(robot_key)[0], shape=(), minval=-jnp.pi, maxval=jnp.pi)
-
-        # 3. Create initial state
+        # 4. Create initial state
         state = EnvState(
             x=robot_pos[0],
             y=robot_pos[1],
@@ -258,7 +193,7 @@ class NavigationEnv(environment.Environment):
             lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
         )
 
-        # 4. Initialize lidar readings - using imported function
+        # 5. Initialize lidar readings
         lidar_distances, collision_types = simulate_lidar(
             state.x, state.y, state.theta, obstacles, goal_pos[0], goal_pos[1], params
         )
