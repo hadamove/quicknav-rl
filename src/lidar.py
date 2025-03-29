@@ -3,12 +3,11 @@ Lidar simulation module for robot environment.
 Provides ray-casting functionality and collision detection.
 """
 
+from enum import IntEnum
 from typing import Protocol, Tuple
 
 import jax
 import jax.numpy as jnp
-
-from constants import GOAL, MAX_DIST, OBSTACLE, WALL
 
 
 class LidarParams(Protocol):
@@ -19,6 +18,16 @@ class LidarParams(Protocol):
     lidar_max_distance: float
     arena_size: float
     goal_tolerance: float
+
+
+# Enum for collision types
+class Collision(IntEnum):
+    """Enumeration of possible collision types for lidar beams."""
+
+    MaxDist = 0  # No collision, max distance reached
+    Wall = 1  # Collision with arena boundary
+    Obstacle = 2  # Collision with obstacle
+    Goal = 3  # Collision with goal
 
 
 def simulate_lidar(
@@ -53,9 +62,11 @@ def simulate_lidar(
     )
 
     # Apply ray_cast to all angles
-    return jax.vmap(ray_cast, in_axes=(0, None, None, None, None, None, None))(
+    distances, collision_types = jax.vmap(ray_cast, in_axes=(0, None, None, None, None, None, None))(
         angles, x, y, obstacles, goal_x, goal_y, params
     )
+
+    return distances, collision_types
 
 
 def ray_cast(
@@ -100,7 +111,7 @@ def ray_cast(
     min_dist = distances[idx]
 
     # Map index to collision type
-    collision_types = jnp.array([WALL, OBSTACLE, GOAL, MAX_DIST])
+    collision_types = jnp.array([Collision.Wall, Collision.Obstacle, Collision.Goal, Collision.MaxDist])
     collision_type = collision_types[idx]
 
     return min_dist, collision_type

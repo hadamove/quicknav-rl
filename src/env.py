@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 
-from lidar import simulate_lidar
+from lidar import Collision, simulate_lidar
 from utils import generate_obstacles, point_to_rectangle_distance, sample_valid_positions
 
 
@@ -202,7 +202,7 @@ class NavigationEnv(environment.Environment):
         return self._get_obs(state, params), state
 
     def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Convert state to observation vector [x, y, sin(θ), cos(θ), goal_x, goal_y, dist, angle, lidar...]."""
+        """Convert state to observation vector [x, y, sin(θ), cos(θ), goal_x, goal_y, dist, angle, lidar_dist..., lidar_goal...]."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
 
@@ -216,22 +216,27 @@ class NavigationEnv(environment.Environment):
         goal_angle = jnp.arctan2(jnp.sin(goal_angle), jnp.cos(goal_angle))  # Normalize to [-pi, pi]
         goal_relative = jnp.array([goal_distance, goal_angle])
 
-        # Combine with lidar
-        return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances])
+        # Convert collision types to goal flag (1 for goal, 0 for wall/obstacle)
+        lidar_goal = (state.lidar_collision_types == Collision.Goal).astype(jnp.float32)
+
+        # Combine robot state, goal, and sensor readings
+        return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances, lidar_goal])
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space for the agent.
 
         Vector containing: robot position (x,y), orientation (sin,cos), goal position,
-        goal relative coordinates (distance, angle), and lidar readings.
+        goal relative coordinates (distance, angle), lidar distances, and goal flags.
         """
-        n_dims = 8 + params.lidar_num_beams
+        # Total dimensions: 8 base + lidar distances + goal flags
+        n_dims = 8 + params.lidar_num_beams * 2
 
         # Lower bounds
         low = jnp.concatenate(
             [
                 jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, -jnp.pi]),  # Robot, goal, relative
-                jnp.zeros(params.lidar_num_beams),  # Lidar
+                jnp.zeros(params.lidar_num_beams),  # Lidar distances
+                jnp.zeros(params.lidar_num_beams),  # Goal flags
             ]
         )
 
@@ -250,7 +255,8 @@ class NavigationEnv(environment.Environment):
                         jnp.pi,  # Goal distance/angle
                     ]
                 ),
-                jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,  # Lidar
+                jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,  # Lidar distances
+                jnp.ones(params.lidar_num_beams),  # Goal flags
             ]
         )
 

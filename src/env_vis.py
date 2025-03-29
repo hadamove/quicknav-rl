@@ -5,8 +5,14 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from constants import GOAL, OBSTACLE, ROBOT_LENGTH, ROBOT_WIDTH, WALL, WHEEL_LENGTH, WHEEL_WIDTH
 from env import EnvParams, EnvState
+from lidar import Collision
+
+# Robot dimensions
+ROBOT_LENGTH = 0.3
+ROBOT_WIDTH = 0.2
+WHEEL_LENGTH = 0.15
+WHEEL_WIDTH = 0.05
 
 # Type alias for RGB color values
 RGBColor = Tuple[int, int, int]
@@ -110,9 +116,9 @@ def render_frame(
         collision_type = lidar_collision_types[i]
 
         # Determine beam color based on collision type
-        if collision_type == GOAL:
+        if collision_type == Collision.Goal:
             color = theme.goal_beam
-        elif collision_type == WALL or collision_type == OBSTACLE:
+        elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
             color = theme.wall_beam
         else:
             color = theme.default_beam
