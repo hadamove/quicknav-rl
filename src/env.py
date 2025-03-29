@@ -11,36 +11,6 @@ from utils import generate_obstacles, sample_valid_positions
 
 
 @struct.dataclass
-class EnvState(struct.PyTreeNode):
-    """Environment state for the differential drive robot navigation task.
-
-    Contains all relevant information about the current state of the environment,
-    including robot pose, goal location, obstacles, and sensor readings.
-    """
-
-    # Robot state
-    x: jnp.ndarray  # Robot x position (meters)
-    y: jnp.ndarray  # Robot y position (meters)
-    theta: jnp.ndarray  # Robot orientation (radians)
-
-    # Goal state
-    goal_x: jnp.ndarray  # Goal x position (meters)
-    goal_y: jnp.ndarray  # Goal y position (meters)
-
-    # Environment elements
-    obstacles: jnp.ndarray  # Obstacle coordinates as [x, y, width, height] array
-
-    # Sensor readings
-    lidar_distances: jnp.ndarray = jnp.array([])  # Distance readings from lidar beams (meters)
-    lidar_collision_types: jnp.ndarray = jnp.array([])  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
-
-    # Episode state
-    time: int = 0  # Current timestep in the episode
-    terminal: jnp.ndarray = jnp.array(False)  # Whether the episode has terminated
-    accumulated_reward: jnp.ndarray = jnp.array(0.0)  # Total reward collected so far
-
-
-@struct.dataclass
 class EnvParams(environment.EnvParams):
     """Parameters for configuring the navigation environment.
 
@@ -73,6 +43,36 @@ class EnvParams(environment.EnvParams):
 
     # Episode parameters
     max_steps_in_episode: int = 200  # Maximum number of steps before episode terminates
+
+
+@struct.dataclass
+class EnvState(struct.PyTreeNode):
+    """Environment state for the differential drive robot navigation task.
+
+    Contains all relevant information about the current state of the environment,
+    including robot pose, goal location, obstacles, and sensor readings.
+    """
+
+    # Robot state
+    x: jnp.ndarray  # Robot x position (meters)
+    y: jnp.ndarray  # Robot y position (meters)
+    theta: jnp.ndarray  # Robot orientation (radians)
+
+    # Goal state
+    goal_x: jnp.ndarray  # Goal x position (meters)
+    goal_y: jnp.ndarray  # Goal y position (meters)
+
+    # Environment elements
+    obstacles: jnp.ndarray  # Obstacle coordinates as [x, y, width, height] array
+
+    # Sensor readings
+    lidar_distances: jnp.ndarray = jnp.array([])  # Distance readings from lidar beams (meters)
+    lidar_collision_types: jnp.ndarray = jnp.array([])  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
+
+    # Episode state
+    time: int = 0  # Current timestep in the episode
+    terminal: jnp.ndarray = jnp.array(False)  # Whether the episode has terminated
+    accumulated_reward: jnp.ndarray = jnp.array(0.0)  # Total reward collected so far
 
 
 class NavigationEnv(environment.Environment):
@@ -206,7 +206,7 @@ class NavigationEnv(environment.Environment):
         return self._get_obs(state, params), state
 
     def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Convert state to observation vector."""
+        """Convert state to observation vector [x, y, sin(θ), cos(θ), goal_x, goal_y, dist, angle, lidar...]."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
 
@@ -224,41 +224,58 @@ class NavigationEnv(environment.Environment):
         return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances])
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
-        """Observation space: [x, y, sin, cos, goal_x, goal_y, dist, angle, lidar...]."""
+        """Observation space for the agent.
+
+        Vector containing: robot position (x,y), orientation (sin,cos), goal position,
+        goal relative coordinates (distance, angle), and lidar readings.
+        """
         n_dims = 8 + params.lidar_num_beams
 
+        # Lower bounds
         low = jnp.concatenate(
-            [jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, -jnp.pi]), jnp.zeros(params.lidar_num_beams)]
+            [
+                jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, -jnp.pi]),  # Robot, goal, relative
+                jnp.zeros(params.lidar_num_beams),  # Lidar
+            ]
         )
 
+        # Upper bounds
         high = jnp.concatenate(
             [
                 jnp.array(
                     [
                         params.arena_size,
-                        params.arena_size,
+                        params.arena_size,  # Robot position
                         1.0,
-                        1.0,
+                        1.0,  # Sin/cos
                         params.arena_size,
-                        params.arena_size,
+                        params.arena_size,  # Goal position
                         jnp.sqrt(2) * params.arena_size,
-                        jnp.pi,
+                        jnp.pi,  # Goal distance/angle
                     ]
                 ),
-                jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,
+                jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,  # Lidar
             ]
         )
 
         return spaces.Box(low, high, (n_dims,), jnp.float32)
 
     def action_space(self, params: EnvParams) -> spaces.Box:
-        """Action space: [left_wheel_speed, right_wheel_speed]."""
+        """Action space: [left_wheel_speed, right_wheel_speed].
+
+        Controls differential drive via wheel speeds. Equal speeds move straight,
+        different speeds turn, opposite speeds rotate in place.
+        """
         low = jnp.array([-params.max_wheel_speed, -params.max_wheel_speed])
         high = jnp.array([params.max_wheel_speed, params.max_wheel_speed])
         return spaces.Box(low, high, (2,), jnp.float32)
 
     def state_space(self, params: EnvParams) -> spaces.Dict:
-        """State space definition."""
+        """Internal state space of the environment.
+
+        Contains robot position/orientation, goal position, and episode tracking.
+        Does not include obstacles, lidar readings, or rewards (handled internally).
+        """
         return spaces.Dict(
             {
                 "x": spaces.Box(0.0, params.arena_size, (), jnp.float32),
@@ -272,7 +289,7 @@ class NavigationEnv(environment.Environment):
         )
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
-        """Terminal state check."""
+        """Terminal when goal is reached or max steps exceeded."""
         return jnp.logical_or(state.terminal, state.time >= params.max_steps_in_episode)
 
     @property
