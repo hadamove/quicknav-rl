@@ -16,7 +16,6 @@ class LidarParams(Protocol):
     lidar_num_beams: int
     lidar_fov: float
     lidar_max_distance: float
-    arena_size: float
     goal_tolerance: float
 
 

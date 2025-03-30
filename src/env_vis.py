@@ -51,7 +51,7 @@ def render_frame(
     img = Image.new("RGB", (aa_width, aa_height), color=theme.background)
     draw = ImageDraw.Draw(img)
     font = ImageFont.load_default(size=12 * aa_scale)
-    scale = min(aa_width, aa_height) / params.arena_size
+    scale = min(aa_width, aa_height) / params.rooms.size
 
     # Convert state fields to numpy for visualization
     x, y = float(state.x), float(state.y)
@@ -79,7 +79,7 @@ def render_frame(
     _draw_robot(draw, (x, y), theta, params.robot_radius, scale, aa_height, theme)
 
     # Draw info
-    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(state.time)}", fill=theme.text, font=font)
+    draw.text((5 * aa_scale, 5 * aa_scale), f"T: {int(state.steps)}", fill=theme.text, font=font)
     draw.text((5 * aa_scale, 20 * aa_scale), f"R: {float(state.accumulated_reward):.2f}", fill=theme.text, font=font)
 
     # Downsample for antialiasing

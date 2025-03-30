@@ -20,6 +20,45 @@ class TileType(IntEnum):
 
 
 @struct.dataclass
+class RoomParams:
+    """Parameters for room generation."""
+
+    size: float = 8.0
+    """Physical size of the room in meters"""
+    grid_size: int = 16
+    """Number of grid cells in each dimension"""
+    target_carved_percent: float = 0.5
+    """Target fraction of inner cells to carve out (0 to 1)"""
+    num_rooms: int = 256
+    """Number of rooms to generate"""
+
+
+def generate_rooms(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Generate multiple room layouts in parallel using vmap.
+
+    Args:
+        key: JAX random key for reproducible generation
+        num_rooms: Number of rooms to generate
+        arena_size: Physical size of the arena in meters
+        grid_size: Number of grid cells in each dimension
+        target_carved_percent: Target fraction of inner cells to carve out (0 to 1)
+
+    Returns:
+        Tuple of (obstacles_batch, free_positions_batch) containing batched room data
+    """
+    # Create parallel random keys for each room
+    keys = jax.random.split(key, params.num_rooms)
+
+    # Vectorize the room generation function across the batch dimension
+    batch_generate_room = jax.vmap(generate_room, in_axes=(0, None))
+
+    # Generate rooms in parallel
+    obstacles_batch, free_positions_batch = batch_generate_room(keys, params)
+
+    return obstacles_batch, free_positions_batch
+
+
+@struct.dataclass
 class RoomGenerationState:
     """State for the room generation random walk."""
 
@@ -33,9 +72,7 @@ class RoomGenerationState:
     steps: jnp.ndarray  # Number of steps taken (as JAX array)
 
 
-def generate_room(
-    key: Any, arena_size: float, grid_size: int, target_carved_percent: float
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+def generate_room(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Generate a room layout using a random walk carving algorithm.
 
     The algorithm works as follows:
@@ -67,23 +104,25 @@ def generate_room(
             - free_positions: Array of [x, y] coordinates for free spaces
     """
     # Initialize grid parameters
-    tile_size = arena_size / grid_size
-    total_cells = grid_size * grid_size
-    target_carved_cells = jnp.floor(total_cells * target_carved_percent).astype(jnp.int32)
-    max_carving_steps = jnp.floor(total_cells * target_carved_percent * 2).astype(jnp.int32)
+    tile_size = params.size / params.grid_size
+    total_cells = params.grid_size * params.grid_size
+    target_carved_cells = jnp.floor(total_cells * params.target_carved_percent).astype(jnp.int32)
+    max_carving_steps = jnp.floor(total_cells * params.target_carved_percent * 2).astype(jnp.int32)
 
     # Initialize grid with all walls (more efficient broadcasting)
-    grid = jnp.full((grid_size, grid_size), TileType.WALL, dtype=jnp.int32)
+    grid = jnp.full((params.grid_size, params.grid_size), TileType.WALL, dtype=jnp.int32)
 
     # Create mask for valid carving area (inner cells only)
     # Use jnp.pad instead of manually constructing the array
     carving_mask = jnp.pad(
-        jnp.ones((grid_size - 2, grid_size - 2), dtype=jnp.int32), ((1, 1), (1, 1)), constant_values=0
+        jnp.ones((params.grid_size - 2, params.grid_size - 2), dtype=jnp.int32),
+        ((1, 1), (1, 1)),
+        constant_values=0,
     )
 
     # Start at center
-    center_x = grid_size // 2
-    center_y = grid_size // 2
+    center_x = params.grid_size // 2
+    center_y = params.grid_size // 2
     grid = grid.at[center_y, center_x].set(TileType.FREE)  # Carve initial position
 
     # Define movement directions (up, right, down, left)
@@ -166,7 +205,7 @@ def generate_room(
     final_grid = final_state.grid
 
     # Create coordinate mesh once and reuse
-    mesh_y, mesh_x = jnp.mgrid[0:grid_size, 0:grid_size]
+    mesh_y, mesh_x = jnp.mgrid[0 : params.grid_size, 0 : params.grid_size]
 
     # Create the full set of obstacle rectangles
     # Every cell in the grid gets a rectangle with proper dimensions

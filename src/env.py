@@ -10,7 +10,7 @@ from gymnax.environments import environment, spaces
 
 from geometry import point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
-from rooms import generate_room, sample_position
+from rooms import RoomParams, sample_position
 
 
 @struct.dataclass
@@ -22,29 +22,46 @@ class EnvParams(environment.EnvParams):
     """
 
     # Robot parameters
-    wheel_base: float = 0.5  # Distance between wheels (meters)
-    max_wheel_speed: float = 1.0  # Maximum speed of each wheel (m/s)
-    robot_radius: float = 0.15  # Radius of the robot for collision detection (meters)
-    dt: float = 0.1  # Simulation timestep (seconds)
+    wheel_base: float = 0.3
+    """Distance between wheels (meters)"""
+    max_wheel_speed: float = 1.0
+    """Maximum speed of each wheel (m/s)"""
+    robot_radius: float = 0.15
+    """Radius of the robot for collision detection (meters)"""
+    dt: float = 0.1
+    """Simulation timestep (seconds)"""
 
     # Environment parameters
-    arena_size: float = 8.0  # Width and height of the square arena (meters)
-    grid_size: int = struct.field(pytree_node=False, default=8)  # Grid size for room generation
-    target_carved_percent: float = 0.5  # Target percentage of carved out space
+    rooms: RoomParams = struct.field(pytree_node=False, default=RoomParams())
+    """Parameters for pre-generated rooms"""
+
+    # Pre-generated rooms
+    obstacles: jnp.ndarray = jnp.zeros((0, 0, 4))
+    """Obstacle arrays [num_rooms, max_obstacles, 4]"""
+    free_positions: jnp.ndarray = jnp.zeros((0, 0, 2))
+    """Free positions [num_rooms, max_positions, 2]"""
 
     # Sensor parameters
-    lidar_num_beams: int = struct.field(pytree_node=False, default=16)  # Number of lidar beams
-    lidar_fov: float = 120.0  # Lidar field of view (degrees)
-    lidar_max_distance: float = 5.0  # Maximum detection range of lidar (meters)
+    lidar_num_beams: int = struct.field(pytree_node=False, default=16)
+    """Number of lidar beams"""
+    lidar_fov: float = 120.0
+    """Lidar field of view (degrees)"""
+    lidar_max_distance: float = 5.0
+    """Maximum detection range of lidar (meters)"""
 
     # Reward parameters
-    goal_tolerance: float = 0.1  # Distance threshold for reaching the goal (meters)
-    step_penalty: float = 0.01  # Small penalty applied at each timestep to encourage efficiency
-    collision_penalty: float = 5.0  # Penalty for colliding with obstacles
-    goal_reward: float = 100.0  # Reward for reaching the goal
+    goal_tolerance: float = 0.1
+    """Distance threshold for reaching the goal (meters)"""
+    step_penalty: float = 0.01
+    """Small penalty applied at each timestep to encourage efficiency"""
+    collision_penalty: float = 5.0
+    """Penalty for colliding with obstacles"""
+    goal_reward: float = 100.0
+    """Reward for reaching the goal"""
 
     # Episode parameters
-    max_steps_in_episode: int = 200  # Maximum number of steps before episode terminates
+    max_steps_in_episode: int = 200
+    """Maximum number of steps before episode terminates"""
 
 
 @struct.dataclass
@@ -66,14 +83,15 @@ class EnvState(struct.PyTreeNode):
 
     # Environment elements
     obstacles: jnp.ndarray  # Obstacle coordinates as [x, y, width, height] array
+    room_idx: jnp.ndarray  # Index of the currently used pre-generated room
 
     # Sensor readings
     lidar_distances: jnp.ndarray  # Distance readings from lidar beams (meters)
     lidar_collision_types: jnp.ndarray  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
 
     # Episode state
-    time: int  # Current timestep in the episode
-    terminal: jnp.ndarray  # Whether the episode has terminated
+    steps: int  # Current timestep in the episode
+    episode_done: jnp.ndarray  # Whether the episode has terminated
     accumulated_reward: jnp.ndarray  # Total reward collected so far
 
 
@@ -82,6 +100,7 @@ class NavigationEnv(environment.Environment):
 
     def __init__(self) -> None:
         super().__init__()
+        # No need to store cached rooms in the instance anymore
 
     @property
     def default_params(self) -> environment.EnvParams:
@@ -104,8 +123,8 @@ class NavigationEnv(environment.Environment):
         # Update position and orientation
         new_theta = jnp.arctan2(jnp.sin(state.theta + omega * params.dt), jnp.cos(state.theta + omega * params.dt))
         dx, dy = v * jnp.cos(state.theta) * params.dt, v * jnp.sin(state.theta) * params.dt
-        new_x = jnp.clip(state.x + dx, params.robot_radius, params.arena_size - params.robot_radius)
-        new_y = jnp.clip(state.y + dy, params.robot_radius, params.arena_size - params.robot_radius)
+        new_x = jnp.clip(state.x + dx, params.robot_radius, params.rooms.size - params.robot_radius)
+        new_y = jnp.clip(state.y + dy, params.robot_radius, params.rooms.size - params.robot_radius)
 
         # 2. Collision detection
         # Calculate distance from robot to each obstacle
@@ -121,7 +140,7 @@ class NavigationEnv(environment.Environment):
         reward, goal_reached = self._calculate_reward(state, new_x, new_y, collision, params)
 
         # 4. Terminal state check
-        out_of_time = state.time + 1 >= params.max_steps_in_episode
+        out_of_time = state.steps + 1 >= params.max_steps_in_episode
         done = jnp.logical_or(goal_reached, out_of_time)
 
         # 5. Lidar simulation
@@ -137,8 +156,9 @@ class NavigationEnv(environment.Environment):
             goal_x=state.goal_x,
             goal_y=state.goal_y,
             obstacles=state.obstacles,
-            time=state.time + 1,
-            terminal=done,
+            room_idx=state.room_idx,
+            steps=state.steps + 1,
+            episode_done=done,
             accumulated_reward=state.accumulated_reward + reward,
             lidar_distances=lidar_distances,
             lidar_collision_types=collision_types,
@@ -175,17 +195,20 @@ class NavigationEnv(environment.Environment):
         return total_reward, goal_reached
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
-        """Reset environment state by sampling a new room layout."""
-        key, room_key, robot_key, goal_key, angle_key = jax.random.split(key, 5)
+        """Reset environment state by sampling a pre-generated room layout."""
+        key, room_key, pos_key, angle_key = jax.random.split(key, 4)
 
-        # Generate the room layout and free positions
-        obstacles, free_positions = generate_room(
-            room_key, params.arena_size, params.grid_size, params.target_carved_percent
-        )
+        # Sample a random room index
+        room_idx = jax.random.randint(room_key, (), 0, params.rooms.num_rooms)
+
+        # Get the obstacles and free positions for this room from params
+        obstacles = params.obstacles[room_idx]
+        free_positions = params.free_positions[room_idx]
 
         # Sample positions for robot and goal separately
-        robot_pos = sample_position(robot_key, free_positions)
-        goal_pos = sample_position(goal_key, free_positions)
+        key_start, key_goal = jax.random.split(pos_key)
+        robot_pos = sample_position(key_start, free_positions)
+        goal_pos = sample_position(key_goal, free_positions)
 
         # Randomly initialize robot orientation
         robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
@@ -197,11 +220,12 @@ class NavigationEnv(environment.Environment):
             theta=robot_angle,
             goal_x=goal_pos[0],
             goal_y=goal_pos[1],
+            steps=0,
+            episode_done=jnp.array(False),
+            room_idx=room_idx,
             obstacles=obstacles,
             lidar_distances=jnp.zeros(params.lidar_num_beams),
             lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
-            time=0,
-            terminal=jnp.array(False),
             accumulated_reward=jnp.array(0.0),
         )
 
@@ -254,13 +278,13 @@ class NavigationEnv(environment.Environment):
             [
                 jnp.array(
                     [
-                        params.arena_size,
-                        params.arena_size,  # Robot position
+                        params.rooms.size,
+                        params.rooms.size,  # Robot position
                         1.0,
                         1.0,  # Sin/cos
-                        params.arena_size,
-                        params.arena_size,  # Goal position
-                        jnp.sqrt(2) * params.arena_size,
+                        params.rooms.size,
+                        params.rooms.size,  # Goal position
+                        jnp.sqrt(2) * params.rooms.size,
                         jnp.pi,  # Goal distance/angle
                     ]
                 ),
@@ -289,19 +313,20 @@ class NavigationEnv(environment.Environment):
         """
         return spaces.Dict(
             {
-                "x": spaces.Box(0.0, params.arena_size, (), jnp.float32),
-                "y": spaces.Box(0.0, params.arena_size, (), jnp.float32),
+                "x": spaces.Box(0.0, params.rooms.size, (), jnp.float32),
+                "y": spaces.Box(0.0, params.rooms.size, (), jnp.float32),
                 "theta": spaces.Box(-jnp.pi, jnp.pi, (), jnp.float32),
-                "goal_x": spaces.Box(0.0, params.arena_size, (), jnp.float32),
-                "goal_y": spaces.Box(0.0, params.arena_size, (), jnp.float32),
-                "time": spaces.Discrete(params.max_steps_in_episode),
-                "terminal": spaces.Discrete(2),
+                "goal_x": spaces.Box(0.0, params.rooms.size, (), jnp.float32),
+                "goal_y": spaces.Box(0.0, params.rooms.size, (), jnp.float32),
+                "room_idx": spaces.Discrete(params.rooms.num_rooms),
+                "steps": spaces.Discrete(params.max_steps_in_episode),
+                "episode_done": spaces.Discrete(2),
             }
         )
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
         """Terminal when goal is reached or max steps exceeded."""
-        return jnp.logical_or(state.terminal, state.time >= params.max_steps_in_episode)
+        return jnp.logical_or(state.episode_done, state.steps >= params.max_steps_in_episode)
 
     @property
     def name(self) -> str:
