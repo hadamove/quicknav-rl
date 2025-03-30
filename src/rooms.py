@@ -38,10 +38,7 @@ def generate_rooms(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarr
 
     Args:
         key: JAX random key for reproducible generation
-        num_rooms: Number of rooms to generate
-        arena_size: Physical size of the arena in meters
-        grid_size: Number of grid cells in each dimension
-        target_carved_percent: Target fraction of inner cells to carve out (0 to 1)
+        params: Parameters for room generation
 
     Returns:
         Tuple of (obstacles_batch, free_positions_batch) containing batched room data
@@ -83,7 +80,7 @@ def generate_room(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarra
         - If the move is valid (within inner grid), move there
         - Carve out the cell (set to 0)
         - Occasionally (5% chance) return to center to avoid getting stuck
-        - Continue until target percentage of cells are carved or max steps reached
+        - Continue until target percentage (`target_carved_percent`) of cells are carved or max steps reached
     4. Convert the grid to physical coordinates:
         - Walls become obstacle rectangles with position and size
         - Free spaces become center points for valid positions
@@ -94,9 +91,7 @@ def generate_room(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarra
 
     Args:
         key: JAX random key for reproducible generation
-        arena_size: Physical size of the arena in meters
-        grid_size: Number of grid cells in each dimension (must be concrete for JIT)
-        target_carved_percent: Target fraction of inner cells to carve out (0 to 1)
+        params: Parameters for room generation
 
     Returns:
         Tuple of (obstacles, free_positions):
