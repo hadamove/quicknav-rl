@@ -30,10 +30,10 @@ class EnvParams(environment.EnvParams):
     # Environment parameters
     arena_size: float = 8.0  # Width and height of the square arena (meters)
     grid_size: int = struct.field(pytree_node=False, default=8)  # Grid size for room generation
-    target_carved_percent: float = 0.3  # Target percentage of carved out space
+    target_carved_percent: float = 0.5  # Target percentage of carved out space
 
     # Sensor parameters
-    lidar_num_beams: int = struct.field(pytree_node=False, default=32)  # Number of lidar beams
+    lidar_num_beams: int = struct.field(pytree_node=False, default=16)  # Number of lidar beams
     lidar_fov: float = 120.0  # Lidar field of view (degrees)
     lidar_max_distance: float = 5.0  # Maximum detection range of lidar (meters)
 
