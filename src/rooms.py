@@ -4,181 +4,227 @@ This module provides functions to generate room layouts using approaches
 that are fully compatible with JAX's JIT compiler.
 """
 
-from typing import Any, Tuple
+from enum import IntEnum
+from typing import Any, Tuple, cast
 
 import jax
 import jax.numpy as jnp
+from flax import struct
+
+
+class TileType(IntEnum):
+    """Enumeration of tile types used in the grid representation."""
+
+    FREE = 0  # Empty space
+    WALL = 1  # Wall/obstacle
+
+
+@struct.dataclass
+class RoomGenerationState:
+    """State for the room generation random walk."""
+
+    grid: jnp.ndarray  # Current grid state (1=wall, 0=free)
+    key: Any  # Random key
+    carved_count: jnp.ndarray  # Number of cells carved so far (as JAX array)
+    current_x: jnp.ndarray  # Current x position (as JAX array)
+    current_y: jnp.ndarray  # Current y position (as JAX array)
+    steps: jnp.ndarray  # Number of steps taken (as JAX array)
 
 
 def generate_room(
     key: Any, arena_size: float, grid_size: int, target_carved_percent: float
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """Generate a room layout
-    # TODO: Explain the algorithm in detail
+    """Generate a room layout using a random walk carving algorithm.
+
+    The algorithm works as follows:
+    1. Start with a grid where all cells are walls (1s)
+    2. Begin at the center of the grid
+    3. Repeatedly:
+        - Choose a random direction (up, right, down, left)
+        - If the move is valid (within inner grid), move there
+        - Carve out the cell (set to 0)
+        - Occasionally (5% chance) return to center to avoid getting stuck
+        - Continue until target percentage of cells are carved or max steps reached
+    4. Convert the grid to physical coordinates:
+        - Walls become obstacle rectangles with position and size
+        - Free spaces become center points for valid positions
+
+    This approach generates connected rooms with organic-looking pathways,
+    ensuring the robot can reach any free space from any other free space.
+    The outer walls are always preserved as they're outside the carving mask.
 
     Args:
-        key: Random key
-        arena_size: Size of the arena
-        grid_size: Size of the grid (must be a concrete value for JIT)
-        target_carved_percent: Target percentage of carved out space
+        key: JAX random key for reproducible generation
+        arena_size: Physical size of the arena in meters
+        grid_size: Number of grid cells in each dimension (must be concrete for JIT)
+        target_carved_percent: Target fraction of inner cells to carve out (0 to 1)
 
     Returns:
         Tuple of (obstacles, free_positions):
-            - obstacles: Array with obstacles as [x, y, width, height]
-            - free_positions: Array with free space coordinates
+            - obstacles: Array of [x, y, width, height] for each wall tile
+            - free_positions: Array of [x, y] coordinates for free spaces
     """
-    # Compute tile size
+    # Initialize grid parameters
     tile_size = arena_size / grid_size
-
-    # Determine target count of cells to carve
     total_cells = grid_size * grid_size
-    target_count = jnp.floor(total_cells * target_carved_percent).astype(jnp.int32)
-    max_steps = jnp.floor(total_cells * target_carved_percent * 2).astype(jnp.int32)
+    target_carved_cells = jnp.floor(total_cells * target_carved_percent).astype(jnp.int32)
+    max_carving_steps = jnp.floor(total_cells * target_carved_percent * 2).astype(jnp.int32)
 
-    # Initialize grid (1 = wall, 0 = free space)
-    grid = jnp.ones((grid_size, grid_size), dtype=jnp.int32)
+    # Initialize grid with all walls
+    grid = jnp.ones((grid_size, grid_size), dtype=jnp.int32) * TileType.WALL
 
-    # Create carving mask (inner cells only)
-    mask = jnp.zeros((grid_size, grid_size), dtype=jnp.int32)
-    mask = mask.at[1:-1, 1:-1].set(1)
+    # Create mask for valid carving area (inner cells only)
+    carving_mask = jnp.zeros((grid_size, grid_size), dtype=jnp.int32)
+    carving_mask = carving_mask.at[1:-1, 1:-1].set(1)
 
-    # Center position
+    # Start at center
     center_x = grid_size // 2
     center_y = grid_size // 2
+    grid = grid.at[center_y, center_x].set(TileType.FREE)  # Carve initial position
 
-    # Carve initial center position
-    grid = grid.at[center_y, center_x].set(0)
+    # Define movement directions (up, right, down, left)
+    directions = jnp.array(
+        [
+            [0, -1],  # up
+            [1, 0],  # right
+            [0, 1],  # down
+            [-1, 0],  # left
+        ]
+    )
 
-    # Movement directions
-    dx = jnp.array([0, 1, 0, -1])
-    dy = jnp.array([-1, 0, 1, 0])
-
-    # Main loop state
-    def body_fun(state_tuple):
-        grid, key, carved_count, current_x, current_y, steps = state_tuple
-
+    def carve_step(state: RoomGenerationState) -> RoomGenerationState:
+        """Perform one step of the random walk carving algorithm."""
         # Choose random direction
-        key, subkey = jax.random.split(key)
-        direction = jax.random.randint(subkey, (), 0, 4)
+        key, move_key = jax.random.split(state.key)
+        direction_idx = jax.random.randint(move_key, (), 0, 4)
+        dx, dy = directions[direction_idx]
 
         # Calculate new position
-        new_x = current_x + dx[direction]
-        new_y = current_y + dy[direction]
+        new_x = state.current_x + dx
+        new_y = state.current_y + dy
 
-        # Ensure new position is valid
-        valid_move = mask[new_y, new_x] > 0
+        # Check if move is valid (within carving mask)
+        is_valid_move = carving_mask[new_y, new_x] > 0
 
-        # Update position
-        current_x = jnp.where(valid_move, new_x, current_x)
-        current_y = jnp.where(valid_move, new_y, current_y)
+        # Update position if valid
+        current_x = cast(jnp.ndarray, jnp.where(is_valid_move, new_x, state.current_x))
+        current_y = cast(jnp.ndarray, jnp.where(is_valid_move, new_y, state.current_y))
 
-        # Carve the tile
-        old_value = grid[current_y, current_x]
-        grid = grid.at[current_y, current_x].set(0)
+        # Carve current position
+        old_value = state.grid[current_y, current_x]
+        new_grid = state.grid.at[current_y, current_x].set(TileType.FREE)
+        new_carved_count = state.carved_count + (old_value == TileType.WALL)
 
-        # Update carved count
-        carved_count = carved_count + (old_value > 0)
+        # Random return to center (5% chance)
+        key, reset_key = jax.random.split(key)
+        should_reset = jax.random.uniform(reset_key) < 0.05
+        current_x = cast(jnp.ndarray, jnp.where(should_reset, center_x, current_x))
+        current_y = cast(jnp.ndarray, jnp.where(should_reset, center_y, current_y))
 
-        # Random return to center
-        key, subkey = jax.random.split(key)
-        return_to_center = jax.random.uniform(subkey) < 0.05
-        current_x = jnp.where(return_to_center, center_x, current_x)
-        current_y = jnp.where(return_to_center, center_y, current_y)
+        return RoomGenerationState(
+            grid=new_grid,
+            key=key,
+            carved_count=new_carved_count,
+            current_x=current_x,
+            current_y=current_y,
+            steps=state.steps + 1,
+        )
 
-        return grid, key, carved_count, current_x, current_y, steps + 1
+    def should_continue_carving(state: RoomGenerationState) -> jnp.ndarray:
+        """Check if we should continue carving."""
+        return (state.carved_count < target_carved_cells) & (state.steps < max_carving_steps)
 
-    # Condition function
-    def cond_fun(state_tuple):
-        _, _, carved_count, _, _, step_count = state_tuple
-        return (carved_count < target_count) & (step_count < max_steps)
+    # Run the carving loop
+    initial_state = RoomGenerationState(
+        grid=grid,
+        key=key,
+        carved_count=jnp.array(1),
+        current_x=jnp.array(center_x),
+        current_y=jnp.array(center_y),
+        steps=jnp.array(0),
+    )
+    final_state = jax.lax.while_loop(should_continue_carving, carve_step, initial_state)
+    final_grid = final_state.grid
 
-    # Run the loop
-    initial_state = (grid, key, 1, center_x, center_y, 0)
-    final_grid, _, _, _, _, _ = jax.lax.while_loop(cond_fun, body_fun, initial_state)
+    # Convert grid to physical coordinates
+    y_coords, x_coords = jnp.mgrid[0:grid_size, 0:grid_size]
+    y_coords = y_coords.reshape(-1)
+    x_coords = x_coords.reshape(-1)
 
-    # Create coordinate arrays for all grid cells
-    y_indices, x_indices = jnp.mgrid[0:grid_size, 0:grid_size]
-    y_indices = y_indices.reshape(-1)
-    x_indices = x_indices.reshape(-1)
-
-    # Create obstacle mask
+    # Create masks for obstacles and free spaces
     grid_flat = final_grid.reshape(-1)
-    obstacle_mask = (grid_flat == 1).astype(jnp.float32)
-    free_mask = (grid_flat == 0).astype(jnp.float32)
+    is_wall = (grid_flat == TileType.WALL).astype(jnp.float32)
+    is_free = (grid_flat == TileType.FREE).astype(jnp.float32)
 
-    # Create obstacle rectangles
-    all_rects = jnp.stack(
-        [
-            x_indices * tile_size,  # x
-            y_indices * tile_size,  # y
-            jnp.ones_like(x_indices) * tile_size,  # width
-            jnp.ones_like(y_indices) * tile_size,  # height
-        ],
-        axis=1,
+    # Create obstacle rectangles (for all wall cells)
+    obstacles = (
+        jnp.stack(
+            [
+                x_coords * tile_size,  # x position
+                y_coords * tile_size,  # y position
+                jnp.ones_like(x_coords) * tile_size,  # width
+                jnp.ones_like(y_coords) * tile_size,  # height
+            ],
+            axis=1,
+        )
+        * is_wall[:, jnp.newaxis]
     )
 
-    # Create free positions
-    all_positions = jnp.stack(
-        [x_indices * tile_size + tile_size / 2, y_indices * tile_size + tile_size / 2],  # x (center)  # y (center)
-        axis=1,
+    # Create free position coordinates (centers of free cells)
+    free_positions = (
+        jnp.stack(
+            [
+                x_coords * tile_size + tile_size / 2,  # x center
+                y_coords * tile_size + tile_size / 2,  # y center
+            ],
+            axis=1,
+        )
+        * is_free[:, jnp.newaxis]
     )
 
-    # Use masking to get valid positions
-    obstacle_rects = all_rects * obstacle_mask[:, jnp.newaxis]
-    free_positions = all_positions * free_mask[:, jnp.newaxis]
-
-    return obstacle_rects, free_positions
+    return obstacles, free_positions
 
 
 def sample_positions(key: Any, positions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """Sample two positions from an array of positions.
+    """Sample two distinct positions from an array of valid positions.
 
     Args:
-        key: Random key
-        positions: Array of positions with shape (n, 2)
+        key: JAX random key for reproducible sampling
+        positions: Array of positions with shape (n, 2), where zeros indicate invalid positions
 
     Returns:
-        Tuple of (pos1, pos2) with two sampled positions
+        Tuple of (pos1, pos2), each a [x, y] coordinate sampled from valid positions.
+        If no valid positions exist, returns fallback positions.
     """
-    # Split key
-    key1, key2 = jax.random.split(key)
+    # Split random key for two independent samples
+    key_start, key_goal = jax.random.split(key)
 
-    # Create a mask of valid positions (non-zero)
-    free_mask = jnp.any(positions != 0, axis=1)
+    # Identify valid positions (non-zero coordinates)
+    is_valid = jnp.any(positions != 0, axis=1)
+    valid_count = jnp.sum(is_valid)
+    safe_count = jnp.maximum(valid_count, 1)  # Avoid empty array issues
 
-    # Get number of valid positions using sum
-    n = jnp.sum(free_mask)
-    n_safe = jnp.maximum(n, 1)  # Ensure we have at least 1 position to sample from
+    # Sample random indices within valid range
+    idx_start = jax.random.randint(key_start, (), 0, safe_count)
+    idx_goal = jax.random.randint(key_goal, (), 0, safe_count)
 
-    # Sample indices
-    idx1 = jax.random.randint(key1, (), 0, n_safe)
-    idx2 = jax.random.randint(key2, (), 0, n_safe)
+    def select_position(target_idx: jnp.ndarray) -> jnp.ndarray:
+        """Select a position corresponding to the nth valid position."""
+        # Count valid positions up to each index
+        valid_position_count = jnp.cumsum(is_valid)
+        # Create selection mask for the target index
+        is_selected = is_valid & (valid_position_count - 1 == target_idx)
+        # Use multiplication and sum to select the position
+        return jnp.sum(positions * is_selected[:, jnp.newaxis], axis=0)
 
-    # Create a running index for valid positions
-    running_idx = jnp.arange(positions.shape[0])
+    # Sample two positions
+    pos_start = select_position(idx_start)
+    pos_goal = select_position(idx_goal)
 
-    # For each position, compute if it should be selected based on the running count
-    # of valid positions up to that point matching our target indices
-    def select_position(idx_target, running_idx, free_mask):
-        # Count of valid positions up to current index (inclusive)
-        valid_count = jnp.cumsum(free_mask)
-        # This position is selected if:
-        # 1. It's a valid position (free_mask is True)
-        # 2. The count of valid positions up to here minus 1 equals our target index
-        is_selected = free_mask & (valid_count - 1 == idx_target)
-        # Return the position if selected, else zeros
-        return jnp.sum(positions * is_selected[:, None], axis=0)
-
-    # Select positions
-    pos1 = select_position(idx1, running_idx, free_mask)
-    pos2 = select_position(idx2, running_idx, free_mask)
-
-    # Handle boundary case with fallback default
-    empty = n == 0
+    # Handle empty array case
+    is_empty = valid_count == 0
     fallback_pos = jnp.array([1.0, 1.0])
+    pos_start = cast(jnp.ndarray, jnp.where(is_empty, fallback_pos, pos_start))
+    pos_goal = cast(jnp.ndarray, jnp.where(is_empty, 2 * fallback_pos, pos_goal))
 
-    # Return positions with fallback
-    pos1 = jnp.where(empty, fallback_pos, pos1)
-    pos2 = jnp.where(empty, 2 * fallback_pos, pos2)
-
-    return pos1, pos2
+    return pos_start, pos_goal

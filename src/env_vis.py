@@ -147,7 +147,7 @@ def _get_beam_color(collision_type: Collision, theme: Theme) -> RGBColor:
     """Get the color for a lidar beam based on its collision type"""
     if collision_type == Collision.Goal:
         return theme.goal_beam
-    elif collision_type == Collision.Wall or collision_type == Collision.Obstacle:
+    elif collision_type == Collision.Obstacle:
         return theme.wall_beam
     else:
         return theme.default_beam

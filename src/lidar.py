@@ -25,9 +25,8 @@ class Collision(IntEnum):
     """Enumeration of possible collision types for lidar beams."""
 
     MaxDist = 0  # No collision, max distance reached
-    Wall = 1  # Collision with arena boundary
-    Obstacle = 2  # Collision with obstacle
-    Goal = 3  # Collision with goal
+    Obstacle = 1  # Collision with obstacle
+    Goal = 2  # Collision with goal
 
 
 def simulate_lidar(
@@ -96,9 +95,6 @@ def ray_cast(
     # Direction vector
     dx, dy = jnp.cos(angle), jnp.sin(angle)
 
-    # Wall intersections
-    wall_t = calculate_wall_intersections(x, y, dx, dy, params.arena_size)
-
     # Obstacle intersections (simplified box collision)
     obs_t = calculate_obstacle_intersections(x, y, dx, dy, obstacles)
 
@@ -106,43 +102,15 @@ def ray_cast(
     goal_t = calculate_goal_intersection(x, y, dx, dy, goal_x, goal_y, params.goal_tolerance)
 
     # Find minimum distance and collision type
-    distances = jnp.array([wall_t, obs_t, goal_t, params.lidar_max_distance])
+    distances = jnp.array([obs_t, goal_t, params.lidar_max_distance])
     idx = jnp.argmin(distances)
     min_dist = distances[idx]
 
     # Map index to collision type
-    collision_types = jnp.array([Collision.Wall, Collision.Obstacle, Collision.Goal, Collision.MaxDist])
+    collision_types = jnp.array([Collision.Obstacle, Collision.Goal, Collision.MaxDist])
     collision_type = collision_types[idx]
 
     return min_dist, collision_type
-
-
-def calculate_wall_intersections(
-    x: jnp.ndarray, y: jnp.ndarray, dx: jnp.ndarray, dy: jnp.ndarray, arena_size: float
-) -> jnp.ndarray:
-    """
-    Calculate intersection with arena walls.
-
-    Args:
-        x: Origin x position
-        y: Origin y position
-        dx: Direction vector x component
-        dy: Direction vector y component
-        arena_size: Size of the arena
-
-    Returns:
-        Minimum positive distance to a wall
-    """
-    # Wall intersections
-    tx1 = jnp.where(dx != 0, (0 - x) / dx, jnp.inf)
-    tx2 = jnp.where(dx != 0, (arena_size - x) / dx, jnp.inf)
-    ty1 = jnp.where(dy != 0, (0 - y) / dy, jnp.inf)
-    ty2 = jnp.where(dy != 0, (arena_size - y) / dy, jnp.inf)
-
-    # Valid wall hits (only positive t values)
-    walls_t = jnp.array([tx1, tx2, ty1, ty2])
-    walls_t = jnp.where(walls_t > 0, walls_t, jnp.inf)
-    return jnp.min(walls_t)
 
 
 def calculate_obstacle_intersections(
