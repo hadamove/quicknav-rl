@@ -10,7 +10,7 @@ from gymnax.environments import environment, spaces
 
 from geometry import point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
-from rooms import generate_room, sample_positions
+from rooms import generate_room, sample_position
 
 
 @struct.dataclass
@@ -176,19 +176,19 @@ class NavigationEnv(environment.Environment):
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
         """Reset environment state by sampling a new room layout."""
-        key, room_key, pos_key = jax.random.split(key, 3)
+        key, room_key, robot_key, goal_key, angle_key = jax.random.split(key, 5)
 
         # Generate the room layout and free positions
         obstacles, free_positions = generate_room(
             room_key, params.arena_size, params.grid_size, params.target_carved_percent
         )
 
-        # Sample positions for robot and goal
-        robot_pos, goal_pos = sample_positions(pos_key, free_positions)
+        # Sample positions for robot and goal separately
+        robot_pos = sample_position(robot_key, free_positions)
+        goal_pos = sample_position(goal_key, free_positions)
 
         # Randomly initialize robot orientation
-        key, subkey = jax.random.split(key)
-        robot_angle = jax.random.uniform(subkey, minval=0, maxval=2 * jnp.pi)
+        robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
 
         # Create initial state
         state = EnvState(

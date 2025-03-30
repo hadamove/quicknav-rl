@@ -212,46 +212,25 @@ def generate_room(
     return all_obstacles, all_free_positions
 
 
-def sample_positions(key: Any, positions: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """Sample two distinct positions from an array of valid positions.
+def sample_position(key: Any, positions: jnp.ndarray) -> jnp.ndarray:
+    """Sample a single position from an array of valid positions.
 
     Args:
         key: JAX random key for reproducible sampling
         positions: Array of positions with shape (n, 2), where zeros indicate invalid positions
 
     Returns:
-        Tuple of (pos1, pos2), each a [x, y] coordinate sampled from valid positions.
-        If no valid positions exist, returns fallback positions.
+        A [x, y] coordinate sampled from valid positions.
+        If no valid positions exist, returns a fallback position.
     """
-    # Split key for two independent samples
-    key_start, key_goal = jax.random.split(key)
-
     # Get position mask and count
-    is_valid = jnp.any(positions != TileType.FREE, axis=1)
-    valid_count = jnp.sum(is_valid)
+    is_valid = jnp.any(positions != 0, axis=1)
 
     # Create random values for all positions
-    rand_start = jax.random.uniform(key_start, (positions.shape[0],))
-    rand_goal = jax.random.uniform(key_goal, (positions.shape[0],))
+    rand_vals = jax.random.uniform(key, (positions.shape[0],))
 
     # Mask invalid positions (set their random values to -1 so they won't be selected)
-    masked_rand_start = jnp.where(is_valid, rand_start, -1.0)
-    masked_rand_goal = jnp.where(is_valid, rand_goal, -1.0)
+    masked_rand = jnp.where(is_valid, rand_vals, -1.0)
 
-    # Select positions with highest random values
-    idx_start = jnp.argmax(masked_rand_start)
-    idx_goal = jnp.argmax(masked_rand_goal)
-
-    # Get the selected positions
-    pos_start = positions[idx_start]
-    pos_goal = positions[idx_goal]
-
-    # Handle empty case with fallback positions
-    fallback_pos = jnp.array([0.0, 0.0])
-    is_empty = valid_count == 0
-
-    # Apply fallback if needed
-    pos_start = jnp.where(is_empty, fallback_pos, pos_start)
-    pos_goal = jnp.where(is_empty, fallback_pos, pos_goal)
-
-    return pos_start, pos_goal
+    # Select position with highest random value
+    return positions[jnp.argmax(masked_rand)]
