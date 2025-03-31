@@ -17,6 +17,7 @@ class LidarParams(Protocol):
     lidar_fov: float
     lidar_max_distance: float
     goal_tolerance: float
+    robot_radius: float
 
 
 # Enum for collision types
@@ -77,12 +78,12 @@ def ray_cast(
     params: LidarParams,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """
-    Cast a single ray and find the closest intersection.
+    Cast a single ray from the perimeter of the robot and find the closest intersection.
 
     Args:
         angle: Ray angle in radians
-        x: Robot x position
-        y: Robot y position
+        x: Robot center x position
+        y: Robot center y position
         obstacles: Array of obstacle definitions
         goal_x: Goal x position
         goal_y: Goal y position
@@ -94,11 +95,15 @@ def ray_cast(
     # Direction vector
     dx, dy = jnp.cos(angle), jnp.sin(angle)
 
+    # Calculate start position on robot perimeter
+    start_x = x + params.robot_radius * dx
+    start_y = y + params.robot_radius * dy
+
     # Obstacle intersections (simplified box collision)
-    obs_t = calculate_obstacle_intersections(x, y, dx, dy, obstacles)
+    obs_t = calculate_obstacle_intersections(start_x, start_y, dx, dy, obstacles)
 
     # Goal intersection
-    goal_t = calculate_goal_intersection(x, y, dx, dy, goal_x, goal_y, params.goal_tolerance)
+    goal_t = calculate_goal_intersection(start_x, start_y, dx, dy, goal_x, goal_y, params.goal_tolerance)
 
     # Find minimum distance and collision type
     distances = jnp.array([obs_t, goal_t, params.lidar_max_distance])
