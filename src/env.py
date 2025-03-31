@@ -10,7 +10,7 @@ from gymnax.environments import environment, spaces
 
 from geometry import point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
-from rooms import RoomParams, sample_position
+from rooms import RoomParams, sample_distant_position, sample_position
 
 
 @struct.dataclass
@@ -210,7 +210,7 @@ class NavigationEnv(environment.Environment):
         # Sample positions for robot and goal separately
         key_start, key_goal = jax.random.split(pos_key)
         robot_pos = sample_position(key_start, free_positions)
-        goal_pos = sample_position(key_goal, free_positions)
+        goal_pos = sample_distant_position(key_goal, free_positions, robot_pos)
 
         # Randomly initialize robot orientation
         robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)

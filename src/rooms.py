@@ -268,3 +268,35 @@ def sample_position(key: Any, positions: jnp.ndarray) -> jnp.ndarray:
 
     # Select position with highest random value
     return positions[jnp.argmax(masked_rand)]
+
+
+def sample_distant_position(
+    key: Any, positions: jnp.ndarray, reference_point: jnp.ndarray, num_samples: int = 5
+) -> jnp.ndarray:
+    """Sample a position that is likely to be distant from a reference point.
+
+    This function samples `num_samples` positions and returns the one with the maximum distance
+    from the reference point. This is useful for sampling a goal position that is far from the
+    starting position.
+
+    Args:
+        key: JAX random key for reproducible sampling
+        positions: Array of positions with shape (n, 2), where zeros indicate invalid positions
+        reference_point: Reference point [x, y] to measure distance from
+        num_samples: Number of positions to sample before choosing the most distant one
+
+    Returns:
+        A [x, y] coordinate sampled from valid positions, biased towards being distant
+        from the reference point.
+    """
+    # Split key for multiple samples
+    keys = jax.random.split(key, num_samples)
+
+    # Sample multiple positions
+    sampled_positions = jax.vmap(sample_position)(keys, jnp.tile(positions[None], (num_samples, 1, 1)))
+
+    # Calculate distances from reference point
+    distances = jnp.sqrt(jnp.sum((sampled_positions - reference_point) ** 2, axis=1))
+
+    # Return the position with maximum distance
+    return sampled_positions[jnp.argmax(distances)]
