@@ -38,6 +38,8 @@ Choose python from `.venv` as interpreter and it should work out of the box.
 - [x] "Better" walls - something that actually resembles a real world room not just random rectangles 😆
 - [x] Better observations for the policy (currently position & rotation of the robot + position of the goal)
     - [x] Maybe include rotation and/or distance of the goal
+- [ ] High priority: Fix lidar beams, currently they originate from the center of the robot, but they should originate from the perimeter of the "circle" collider representing the robot
+    - [ ] This is important for the agent to learn to avoid walls, without it detects "free" space although it's close to a wall
 - [ ] Try different reward weights
     - [ ] Penalization for going back (i.e. backtracking)
 - [ ] W&B integration -- see https://github.com/keraJLi/rejax/blob/main/examples/wandb_integration.py
