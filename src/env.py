@@ -52,12 +52,14 @@ class EnvParams(environment.EnvParams):
     # Reward parameters
     goal_tolerance: float = 0.1
     """Distance threshold for reaching the goal (meters)"""
-    step_penalty: float = 0.01
+    step_penalty: float = 0.1
     """Small penalty applied at each timestep to encourage efficiency"""
     collision_penalty: float = 5.0
     """Penalty for colliding with obstacles"""
-    goal_reward: float = 100.0
+    goal_reward: float = 50.0
     """Reward for reaching the goal"""
+    progress_reward: float = 1.0
+    """Reward weight for getting closer to the target"""
 
     # Episode parameters
     max_steps_in_episode: int = 200
@@ -185,7 +187,7 @@ class NavigationEnv(environment.Environment):
         goal_reached = new_dist <= params.goal_tolerance
 
         # Compute reward components
-        progress_reward = prev_dist - new_dist
+        progress_reward = (prev_dist - new_dist) * params.progress_reward
         collision_reward = jnp.where(collision, -params.collision_penalty, 0.0)
         goal_reward = jnp.where(goal_reached, params.goal_reward, 0.0)
         step_penalty = -params.step_penalty
