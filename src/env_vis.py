@@ -73,6 +73,7 @@ def render_frame(
         aa_height,
         aa_scale,
         theme,
+        params,
     )
 
     # Draw robot body and wheels
@@ -123,6 +124,7 @@ def _draw_lidar(
     img_height: int,
     aa_scale: int,
     theme: Theme,
+    params: EnvParams,
 ):
     """Draw lidar beams with their collision types."""
     fov_rad = np.radians(lidar_fov)
@@ -136,10 +138,22 @@ def _draw_lidar(
         # Determine beam color based on collision type
         color = _get_beam_color(Collision(collision_type), theme)
 
-        # Draw the beam
+        # Calculate starting point on robot perimeter
         x, y = float(state.x), float(state.y)
-        start = _world_to_pixels(x, y, scale, img_height)
-        end = _world_to_pixels(x + d * dx, y + d * dy, scale, img_height)
+
+        # Start point is on the perimeter of the robot
+        start_x = x + params.robot_radius * dx
+        start_y = y + params.robot_radius * dy
+
+        # End point is at the measured distance from the perimeter start point
+        end_x = start_x + d * dx
+        end_y = start_y + d * dy
+
+        # Convert to pixel coordinates
+        start = _world_to_pixels(start_x, start_y, scale, img_height)
+        end = _world_to_pixels(end_x, end_y, scale, img_height)
+
+        # Draw the beam
         draw.line([start, end], fill=color, width=max(1, int(0.5 * aa_scale)))
 
 
