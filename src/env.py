@@ -54,13 +54,13 @@ class EnvParams(environment.EnvParams):
     """Distance threshold for reaching the goal (meters)"""
     step_penalty: float = 0.01
     """Small penalty applied at each timestep to encourage efficiency"""
-    collision_penalty: float = 5.0
+    collision_penalty: float = 1.0
     """Penalty for colliding with obstacles"""
     goal_reward: float = 100.0
     """Reward for reaching the goal"""
 
     # Episode parameters
-    max_steps_in_episode: int = 200
+    max_steps_in_episode: int = 300
     """Maximum number of steps before episode terminates"""
 
 
