@@ -26,7 +26,7 @@ class EnvParams(environment.EnvParams):
     """Distance between wheels (meters)"""
     max_wheel_speed: float = 1.0
     """Maximum speed of each wheel (m/s)"""
-    robot_radius: float = 0.15
+    robot_radius: float = 0.1
     """Radius of the robot for collision detection (meters)"""
     dt: float = 0.1
     """Simulation timestep (seconds)"""
@@ -46,7 +46,7 @@ class EnvParams(environment.EnvParams):
     """Number of lidar beams"""
     lidar_fov: float = 120.0
     """Lidar field of view (degrees)"""
-    lidar_max_distance: float = 5.0
+    lidar_max_distance: float = 3.0
     """Maximum detection range of lidar (meters)"""
 
     # Reward parameters
