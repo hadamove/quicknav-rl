@@ -88,9 +88,6 @@ class EnvState(struct.PyTreeNode):
     # Sensor readings
     lidar_distances: jnp.ndarray  # Distance readings from lidar beams (meters)
     lidar_collision_types: jnp.ndarray  # Type of object each beam hit (0=none, 1=obstacle, 2=goal)
-    
-    # Visitation counter
-    visit_counts: jnp.ndarray  # Grid cell visit counts [grid_size, grid_size]
 
     # Episode state
     steps: int  # Current timestep in the episode
@@ -150,21 +147,8 @@ class NavigationEnv(environment.Environment):
         lidar_distances, collision_types = simulate_lidar(
             new_x, new_y, new_theta, state.obstacles, state.goal_x, state.goal_y, params
         )
-        
-        # 6. Update visitation count
-        # Convert position to grid coordinates
-        grid_size = params.rooms.grid_size
-        grid_x = jnp.clip(jnp.floor(new_x / params.rooms.size * grid_size).astype(jnp.int32), 0, grid_size - 1)
-        grid_y = jnp.clip(jnp.floor(new_y / params.rooms.size * grid_size).astype(jnp.int32), 0, grid_size - 1)
-        
-        # Create update matrix (all zeros except a 1 at the current position)
-        update = jnp.zeros((grid_size, grid_size), dtype=jnp.int32)
-        update = update.at[grid_y, grid_x].set(1)
-        
-        # Update visit counts
-        new_visit_counts = state.visit_counts + update
 
-        # 7. Update state
+        # 6. Update state
         new_state = EnvState(
             x=new_x,
             y=new_y,
@@ -178,11 +162,10 @@ class NavigationEnv(environment.Environment):
             accumulated_reward=state.accumulated_reward + reward,
             lidar_distances=lidar_distances,
             lidar_collision_types=collision_types,
-            visit_counts=new_visit_counts,
         )
 
         # Return observations, state, reward, done, info
-        obs = self._get_obs(new_state, params)
+        obs = self._get_obs(new_state)
         info = {"discount": jnp.where(done, 0.0, 1.0)}
 
         return obs, new_state, reward, done, info
@@ -239,14 +222,6 @@ class NavigationEnv(environment.Environment):
         # Randomly initialize robot orientation
         robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
 
-        # Initialize visit counts with zeros
-        visit_counts = jnp.zeros((params.rooms.grid_size, params.rooms.grid_size), dtype=jnp.int32)
-        
-        # Add initial position to visit counts
-        grid_x = jnp.clip(jnp.floor(robot_pos[0] / params.rooms.size * params.rooms.grid_size).astype(jnp.int32), 0, params.rooms.grid_size - 1)
-        grid_y = jnp.clip(jnp.floor(robot_pos[1] / params.rooms.size * params.rooms.grid_size).astype(jnp.int32), 0, params.rooms.grid_size - 1)
-        visit_counts = visit_counts.at[grid_y, grid_x].set(1)
-
         # Create initial state
         state = EnvState(
             x=robot_pos[0],
@@ -261,15 +236,14 @@ class NavigationEnv(environment.Environment):
             lidar_distances=jnp.zeros(params.lidar_num_beams),
             lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
             accumulated_reward=jnp.array(0.0),
-            visit_counts=visit_counts,
         )
 
         # Get initial observation
-        obs = self._get_obs(state, params)
+        obs = self._get_obs(state)
 
         return obs, state
 
-    def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def _get_obs(self, state: EnvState) -> chex.Array:
         """Convert state to observation vector."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
@@ -277,31 +251,17 @@ class NavigationEnv(environment.Environment):
         # Convert collision types to goal flag (1 for goal, 0 for wall/obstacle)
         lidar_goal = (state.lidar_collision_types == Collision.Goal).astype(jnp.float32)
 
-        # Lidar collision flag
-        lidar_collision = (state.lidar_collision_types == Collision.Obstacle).astype(jnp.float32)
-        
-        # Get current grid cell
-        grid_size = state.visit_counts.shape[0]  # Assuming square grid
-        room_size = params.rooms.size
-        grid_x = jnp.clip(jnp.floor(state.x / room_size * grid_size).astype(jnp.int32), 0, grid_size - 1)
-        grid_y = jnp.clip(jnp.floor(state.y / room_size * grid_size).astype(jnp.int32), 0, grid_size - 1)
-        
-        # Get visit count for current cell
-        current_cell_visits = state.visit_counts[grid_y, grid_x]
-        current_cell_visits = jnp.array([current_cell_visits], dtype=jnp.float32)
-
-        # Combine robot state, goal, sensor readings, and current cell visit count
-        return jnp.concatenate([pose, state.lidar_distances, lidar_goal, lidar_collision, current_cell_visits])
+        # Combine robot state, goal, and sensor readings
+        return jnp.concatenate([pose, state.lidar_distances, lidar_goal])
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space for the agent.
 
         Vector containing: robot position (x,y), orientation (sin,cos),
-        lidar distances, goal flags (indicating if the beam hit the goal),
-        and current grid cell visit count.
+        lidar distances, and goal flags (indicating if the beam hit the goal).
         """
-        # Total dimensions: 4 base (x,y,sin,cos) + lidar distances + goal flags + current cell visit count
-        n_dims = 4 + params.lidar_num_beams * 3 + 1
+        # Total dimensions: 4 base (x,y,sin,cos) + lidar distances + goal flags
+        n_dims = 4 + params.lidar_num_beams * 2
 
         # Lower bounds
         low = jnp.concatenate(
@@ -309,8 +269,6 @@ class NavigationEnv(environment.Environment):
                 jnp.array([0.0, 0.0, -1.0, -1.0]),  # Robot position and orientation (x,y,sin,cos)
                 jnp.zeros(params.lidar_num_beams),  # Lidar distances
                 jnp.zeros(params.lidar_num_beams),  # Goal flags
-                jnp.zeros(params.lidar_num_beams),  # Lidar collision flags
-                jnp.zeros(1),                       # Current cell visit count
             ]
         )
 
@@ -320,8 +278,6 @@ class NavigationEnv(environment.Environment):
                 jnp.array([params.rooms.size, params.rooms.size, 1.0, 1.0]),  # Robot position and orientation
                 jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,  # Lidar distances
                 jnp.ones(params.lidar_num_beams),  # Goal flags
-                jnp.ones(params.lidar_num_beams),  # Lidar collision flags
-                jnp.ones(1) * params.max_steps_in_episode,  # Current cell visit count (max is max_steps)
             ]
         )
 
