@@ -1,6 +1,7 @@
 """Visualization utilities for the environment state"""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Sequence, Tuple
 
 import imageio
@@ -86,7 +87,7 @@ def render_frame(
     return np.array(img.resize((img_width, img_height), resample=Image.Resampling.LANCZOS))
 
 
-def save_gif(frames: Sequence[Frame], filename: str, duration_per_frame: float = 0.1):
+def save_gif(frames: Sequence[Frame], filename: Path, duration_per_frame: float = 0.1):
     """Save a sequence of frames as a GIF animation"""
     try:
         imageio.mimsave(filename, list(frames), duration=duration_per_frame, loop=0)
