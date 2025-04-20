@@ -165,7 +165,7 @@ class NavigationEnv(environment.Environment):
         )
 
         # Return observations, state, reward, done, info
-        obs = self._get_obs(new_state, params)
+        obs = self._get_obs(new_state)
         info = {"discount": jnp.where(done, 0.0, 1.0)}
 
         return obs, new_state, reward, done, info
@@ -179,18 +179,16 @@ class NavigationEnv(environment.Environment):
         params: EnvParams,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Calculate reward and check if goal is reached."""
-        # Calculate distance to goal before and after movement
-        prev_dist = jnp.sqrt((state.x - state.goal_x) ** 2 + (state.y - state.goal_y) ** 2)
-        new_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
-        goal_reached = new_dist <= params.goal_tolerance
+        # Calculate distance to goal and check if goal is reached
+        goal_dist = jnp.sqrt((new_x - state.goal_x) ** 2 + (new_y - state.goal_y) ** 2)
+        goal_reached = goal_dist <= params.goal_tolerance
 
         # Compute reward components
-        progress_reward = prev_dist - new_dist
         collision_reward = jnp.where(collision, -params.collision_penalty, 0.0)
         goal_reward = jnp.where(goal_reached, params.goal_reward, 0.0)
         step_penalty = -params.step_penalty
 
-        total_reward = progress_reward + collision_reward + goal_reward + step_penalty
+        total_reward = collision_reward + goal_reward + step_penalty
 
         return total_reward, goal_reached
 
@@ -241,44 +239,34 @@ class NavigationEnv(environment.Environment):
         )
 
         # Get initial observation
-        obs = self._get_obs(state, params)
+        obs = self._get_obs(state)
 
         return obs, state
 
-    def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def _get_obs(self, state: EnvState) -> chex.Array:
         """Convert state to observation vector."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
-
-        # Goal position
-        goal = jnp.array([state.goal_x, state.goal_y])
-
-        # Goal in robot frame (distance and angle)
-        dx, dy = state.goal_x - state.x, state.goal_y - state.y
-        goal_distance = jnp.sqrt(dx**2 + dy**2)
-        goal_angle = jnp.arctan2(dy, dx) - state.theta
-        goal_angle = jnp.arctan2(jnp.sin(goal_angle), jnp.cos(goal_angle))  # Normalize to [-pi, pi]
-        goal_relative = jnp.array([goal_distance, goal_angle])
 
         # Convert collision types to goal flag (1 for goal, 0 for wall/obstacle)
         lidar_goal = (state.lidar_collision_types == Collision.Goal).astype(jnp.float32)
 
         # Combine robot state, goal, and sensor readings
-        return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances, lidar_goal])
+        return jnp.concatenate([pose, state.lidar_distances, lidar_goal])
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space for the agent.
 
-        Vector containing: robot position (x,y), orientation (sin,cos), goal position,
-        goal relative coordinates (distance, angle), lidar distances, and goal flags.
+        Vector containing: robot position (x,y), orientation (sin,cos),
+        lidar distances, and goal flags (indicating if the beam hit the goal).
         """
-        # Total dimensions: 8 base + lidar distances + goal flags
-        n_dims = 8 + params.lidar_num_beams * 2
+        # Total dimensions: 4 base (x,y,sin,cos) + lidar distances + goal flags
+        n_dims = 4 + params.lidar_num_beams * 2
 
         # Lower bounds
         low = jnp.concatenate(
             [
-                jnp.array([0.0, 0.0, -1.0, -1.0, 0.0, 0.0, 0.0, -jnp.pi]),  # Robot, goal, relative
+                jnp.array([0.0, 0.0, -1.0, -1.0]),  # Robot position and orientation (x,y,sin,cos)
                 jnp.zeros(params.lidar_num_beams),  # Lidar distances
                 jnp.zeros(params.lidar_num_beams),  # Goal flags
             ]
@@ -287,18 +275,7 @@ class NavigationEnv(environment.Environment):
         # Upper bounds
         high = jnp.concatenate(
             [
-                jnp.array(
-                    [
-                        params.rooms.size,
-                        params.rooms.size,  # Robot position
-                        1.0,
-                        1.0,  # Sin/cos
-                        params.rooms.size,
-                        params.rooms.size,  # Goal position
-                        jnp.sqrt(2) * params.rooms.size,
-                        jnp.pi,  # Goal distance/angle
-                    ]
-                ),
+                jnp.array([params.rooms.size, params.rooms.size, 1.0, 1.0]),  # Robot position and orientation
                 jnp.ones(params.lidar_num_beams) * params.lidar_max_distance,  # Lidar distances
                 jnp.ones(params.lidar_num_beams),  # Goal flags
             ]
