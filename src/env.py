@@ -194,12 +194,23 @@ class NavigationEnv(environment.Environment):
 
         return total_reward, goal_reached
 
-    def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
-        """Reset environment state by sampling a pre-generated room layout."""
+    def reset_env(self, key: chex.PRNGKey, params: EnvParams, test: bool = False) -> Tuple[chex.Array, EnvState]:
+        """Reset environment state by sampling a pre-generated room layout.
+
+        Args:
+            key: Random key for sampling
+            params: Environment parameters
+            test: If True, use the second half of rooms for testing, otherwise use first half for training
+        """
         key, room_key, pos_key, angle_key = jax.random.split(key, 4)
 
-        # Sample a random room index
-        room_idx = jax.random.randint(room_key, (), 0, params.rooms.num_rooms)
+        # Sample a random room index from either the first or second half of rooms based on test flag
+        num_rooms = params.rooms.num_rooms
+        half_rooms = num_rooms // 2
+
+        min_room = jnp.where(test, half_rooms, 0)
+        max_room = jnp.where(test, num_rooms, half_rooms)
+        room_idx = jax.random.randint(room_key, (), min_room, max_room)
 
         # Get the obstacles and free positions for this room from params
         obstacles = params.obstacles[room_idx]
