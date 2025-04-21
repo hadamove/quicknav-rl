@@ -26,7 +26,7 @@ class NavigationEnvParams(environment.EnvParams):
     """Distance between wheels (meters)"""
     max_wheel_speed: float = 1.0
     """Maximum speed of each wheel (m/s)"""
-    robot_radius: float = 0.1
+    robot_radius: float = 0.15
     """Radius of the robot for collision detection (meters)"""
     dt: float = 0.1
     """Simulation timestep (seconds)"""
@@ -52,7 +52,7 @@ class NavigationEnvParams(environment.EnvParams):
     # Reward parameters
     goal_tolerance: float = 0.1
     """Distance threshold for reaching the goal (meters)"""
-    step_penalty: float = 0.01
+    step_penalty: float = 0.1
     """Small penalty applied at each timestep to encourage efficiency"""
     collision_penalty: float = 1.0
     """Penalty for colliding with obstacles"""
