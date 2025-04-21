@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 
-from geometry import point_to_rectangle_distance
+from geometry import handle_collision_with_sliding, point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
 from rooms import RoomParams, sample_position
 
@@ -132,9 +132,14 @@ class NavigationEnv(environment.Environment):
         distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(robot_pos, state.obstacles)
         collision = jnp.any(distances < params.robot_radius)
 
-        # On collision: stay in place and get penalty
-        new_x = jnp.where(collision, state.x, new_x)
-        new_y = jnp.where(collision, state.y, new_y)
+        # Handle collision with sliding behavior from geometry module
+        slide_x, slide_y = handle_collision_with_sliding(
+            state.x, state.y, new_x, new_y, state.obstacles, params.robot_radius
+        )
+        
+        # Apply sliding only if there's a collision
+        new_x = jnp.where(collision, slide_x, new_x)
+        new_y = jnp.where(collision, slide_y, new_y)
 
         # 3. Reward calculation
         reward, goal_reached = self._calculate_reward(state, new_x, new_y, collision, params)
@@ -194,7 +199,9 @@ class NavigationEnv(environment.Environment):
 
         return total_reward, goal_reached
 
-    def reset_env(self, key: chex.PRNGKey, params: NavigationEnvParams, test: bool = False) -> Tuple[chex.Array, EnvState]:
+    def reset_env(
+        self, key: chex.PRNGKey, params: NavigationEnvParams, test: bool = False
+    ) -> Tuple[chex.Array, EnvState]:
         """Reset environment state by sampling a pre-generated room layout.
 
         Args:
