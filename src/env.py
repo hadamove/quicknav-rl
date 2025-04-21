@@ -94,6 +94,9 @@ class EnvState(struct.PyTreeNode):
     episode_done: jnp.ndarray  # Whether the episode has terminated
     accumulated_reward: jnp.ndarray  # Total reward collected so far
 
+    # Position history
+    position_history: jnp.ndarray  # Buffer of past positions, shape [max_steps_in_episode, 2]
+
 
 class NavigationEnv(environment.Environment):
     """Differential drive robot navigating to a goal with obstacles and lidar."""
@@ -136,7 +139,7 @@ class NavigationEnv(environment.Environment):
         slide_x, slide_y = handle_collision_with_sliding(
             state.x, state.y, new_x, new_y, state.obstacles, params.robot_radius
         )
-        
+
         # Apply sliding only if there's a collision
         new_x = jnp.where(collision, slide_x, new_x)
         new_y = jnp.where(collision, slide_y, new_y)
@@ -153,7 +156,10 @@ class NavigationEnv(environment.Environment):
             new_x, new_y, new_theta, state.obstacles, state.goal_x, state.goal_y, params
         )
 
-        # 6. Update state
+        # 6. Update position history buffer
+        position_history = state.position_history.at[state.steps].set(jnp.array([new_x, new_y]))
+
+        # 7. Update state
         new_state = EnvState(
             x=new_x,
             y=new_y,
@@ -167,6 +173,7 @@ class NavigationEnv(environment.Environment):
             accumulated_reward=state.accumulated_reward + reward,
             lidar_distances=lidar_distances,
             lidar_collision_types=collision_types,
+            position_history=position_history,
         )
 
         # Return observations, state, reward, done, info
@@ -231,6 +238,10 @@ class NavigationEnv(environment.Environment):
         # Randomly initialize robot orientation
         robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
 
+        # Initialize position history with robot's starting position in first slot, zeros elsewhere
+        position_history = jnp.zeros((params.max_steps_in_episode, 2))
+        position_history = position_history.at[0].set(robot_pos)
+
         # Create initial state
         state = EnvState(
             x=robot_pos[0],
@@ -245,6 +256,7 @@ class NavigationEnv(environment.Environment):
             lidar_distances=jnp.zeros(params.lidar_num_beams),
             lidar_collision_types=jnp.zeros(params.lidar_num_beams, dtype=jnp.int32),
             accumulated_reward=jnp.array(0.0),
+            position_history=position_history,
         )
 
         # Get initial observation

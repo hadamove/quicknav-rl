@@ -28,6 +28,7 @@ class Theme:
     wall_beam: RGBColor = (255, 50, 50)
     goal_beam: RGBColor = (70, 140, 40)
     text: RGBColor = (0, 0, 0)
+    path: RGBColor = (173, 216, 230)  # Light blue color for robot path
 
 
 Frame = np.ndarray
@@ -63,6 +64,9 @@ def render_frame(
     # Draw environment elements
     _draw_obstacles(draw, obstacles, scale, aa_height, theme)
     _draw_goal(draw, (goal_x, goal_y), params.goal_tolerance, scale, aa_height, theme)
+
+    # Draw the robot's path
+    _draw_path(draw, state, scale, aa_height, theme)
 
     # Draw lidar beams
     _draw_lidar(
@@ -238,3 +242,27 @@ def _get_polygon_pixels(
         for (lx, ly) in corners
         for (px, py) in [_rotate_point(lx, ly, angle)]
     ]
+
+
+def _draw_path(
+    draw: ImageDraw.ImageDraw,
+    state: EnvState,
+    scale: float,
+    img_height: int,
+    theme: Theme,
+):
+    """Draw the robot's position history as a path."""
+    # Only draw positions up to the current step
+    path = np.array(state.position_history[: state.steps + 1])
+
+    # Need at least 2 points to draw a line
+    if len(path) >= 2:
+        points = []
+        for i in range(len(path)):
+            if np.all(path[i] != 0) or i == 0:  # Skip zero entries (uninitialized positions)
+                px, py = _world_to_pixels(path[i, 0], path[i, 1], scale, img_height)
+                points.append((px, py))
+
+        # Draw the path if we have points
+        if len(points) >= 2:
+            draw.line(points, fill=theme.path, width=max(1, int(1.5 * scale / 50)))
