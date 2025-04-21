@@ -60,7 +60,7 @@ class NavigationEnvParams(environment.EnvParams):
     """Reward for reaching the goal"""
 
     # Episode parameters
-    max_steps_in_episode: int = 300
+    max_steps_in_episode: int = struct.field(pytree_node=False, default=300)
     """Maximum number of steps before episode terminates"""
 
 
