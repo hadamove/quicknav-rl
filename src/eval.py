@@ -48,7 +48,7 @@ def evaluate_model(
 
     for i in range(n_eval_episodes):
         key, reset_key = jax.random.split(key)
-        obs, state = agent.env.reset(reset_key, agent.env_params)
+        obs, state = agent.env.reset_env(reset_key, agent.env_params, test=True)
 
         done = False
         episode_return = 0
