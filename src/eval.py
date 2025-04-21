@@ -4,11 +4,11 @@ from typing import List
 import jax
 import jax.numpy as jnp
 from flax.training.train_state import TrainState
-from rejax import PPO, PQN
+from rejax import PPO, SAC, TD3
 
 import env_vis
 
-Agent = PPO | PQN
+Agent = PPO | SAC | TD3
 
 
 @dataclass
