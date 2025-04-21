@@ -42,13 +42,17 @@ def evaluate_model(
 
     act = jax.jit(agent.make_act(train_state))
     key = jax.random.PRNGKey(seed)
+    reset_key, action_key = jax.random.split(key)
 
     frames = []
     returns = jnp.zeros(n_eval_episodes)
 
     for i in range(n_eval_episodes):
-        key, reset_key = jax.random.split(key)
-        obs, state = agent.env.reset_env(reset_key, agent.env_params, test=True)
+        # Split the reset key to get a new reset key for this episode and the next reset key
+        reset_key, next_reset_key = jax.random.split(reset_key)
+
+        # Reset the environment - choose a new random room, start, and goal
+        obs, state = agent.env.reset(reset_key, agent.env_params)
 
         done = False
         episode_return = 0
@@ -59,13 +63,14 @@ def evaluate_model(
                 frame = env_vis.render_frame(state, agent.env_params)
                 frames.append(frame)
 
-            # Choose action and step environment
-            key, act_key, step_key = jax.random.split(key, 3)
-            action = act(obs, act_key)
-            obs, state, reward, done, _ = agent.env.step(step_key, state, action, agent.env_params)
+            # Choose action and step the environment
+            action_key, act_subkey, step_subkey = jax.random.split(action_key, 3)
+            action = act(obs, act_subkey)
+            obs, state, reward, done, _ = agent.env.step(step_subkey, state, action, agent.env_params)
             episode_return += reward
 
         returns = returns.at[i].set(episode_return)
+        reset_key = next_reset_key
 
     print(f"Evaluation finished, mean return: {returns.mean()}")
     if render:
