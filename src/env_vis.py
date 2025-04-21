@@ -8,7 +8,7 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from env import EnvParams, EnvState
+from env import EnvState, NavigationEnvParams
 from lidar import Collision
 
 # Type alias for RGB color values
@@ -39,7 +39,7 @@ Point = Tuple[float, float]
 
 def render_frame(
     state: EnvState,
-    params: EnvParams,
+    params: NavigationEnvParams,
     img_width: int = 600,
     img_height: int = 600,
     theme: Theme = Theme(),

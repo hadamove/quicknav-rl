@@ -14,7 +14,7 @@ from rooms import RoomParams, sample_position
 
 
 @struct.dataclass
-class EnvParams(environment.EnvParams):
+class NavigationEnvParams(environment.EnvParams):
     """Parameters for configuring the navigation environment.
 
     Defines all configurable aspects of the environment, including physical dimensions,
@@ -104,14 +104,14 @@ class NavigationEnv(environment.Environment):
 
     @property
     def default_params(self) -> environment.EnvParams:
-        return EnvParams()
+        return NavigationEnvParams()
 
     def step_env(
         self,
         key: chex.PRNGKey,
         state: EnvState,
         action: Union[chex.Array, int, float],
-        params: EnvParams,
+        params: NavigationEnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
         """Perform a single timestep state transition."""
         # 1. Physics update
@@ -176,7 +176,7 @@ class NavigationEnv(environment.Environment):
         new_x: jnp.ndarray,
         new_y: jnp.ndarray,
         collision: jnp.ndarray,
-        params: EnvParams,
+        params: NavigationEnvParams,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Calculate reward and check if goal is reached."""
         # Calculate distance to goal before and after movement
@@ -194,7 +194,7 @@ class NavigationEnv(environment.Environment):
 
         return total_reward, goal_reached
 
-    def reset_env(self, key: chex.PRNGKey, params: EnvParams, test: bool = False) -> Tuple[chex.Array, EnvState]:
+    def reset_env(self, key: chex.PRNGKey, params: NavigationEnvParams, test: bool = False) -> Tuple[chex.Array, EnvState]:
         """Reset environment state by sampling a pre-generated room layout.
 
         Args:
@@ -245,7 +245,7 @@ class NavigationEnv(environment.Environment):
 
         return obs, state
 
-    def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def _get_obs(self, state: EnvState, params: NavigationEnvParams) -> chex.Array:
         """Convert state to observation vector."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
@@ -266,7 +266,7 @@ class NavigationEnv(environment.Environment):
         # Combine robot state, goal, and sensor readings
         return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances, lidar_goal])
 
-    def observation_space(self, params: EnvParams) -> spaces.Box:
+    def observation_space(self, params: NavigationEnvParams) -> spaces.Box:
         """Observation space for the agent.
 
         Vector containing: robot position (x,y), orientation (sin,cos), goal position,
@@ -306,7 +306,7 @@ class NavigationEnv(environment.Environment):
 
         return spaces.Box(low, high, (n_dims,), jnp.float32)
 
-    def action_space(self, params: EnvParams) -> spaces.Box:
+    def action_space(self, params: NavigationEnvParams) -> spaces.Box:
         """Action space: [left_wheel_speed, right_wheel_speed].
 
         Controls differential drive via wheel speeds. Equal speeds move straight,
@@ -316,7 +316,7 @@ class NavigationEnv(environment.Environment):
         high = jnp.array([params.max_wheel_speed, params.max_wheel_speed])
         return spaces.Box(low, high, (2,), jnp.float32)
 
-    def state_space(self, params: EnvParams) -> spaces.Dict:
+    def state_space(self, params: NavigationEnvParams) -> spaces.Dict:
         """Internal state space of the environment.
 
         Contains robot position/orientation, goal position, and episode tracking.
@@ -335,7 +335,7 @@ class NavigationEnv(environment.Environment):
             }
         )
 
-    def is_terminal(self, state: EnvState, params: EnvParams) -> jnp.ndarray:
+    def is_terminal(self, state: EnvState, params: NavigationEnvParams) -> jnp.ndarray:
         """Terminal when goal is reached or max steps exceeded."""
         return jnp.logical_or(state.episode_done, state.steps >= params.max_steps_in_episode)
 
