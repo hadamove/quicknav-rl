@@ -45,16 +45,16 @@ def point_to_rectangle_distance(point: jnp.ndarray, rect: jnp.ndarray) -> jnp.nd
 
 def handle_collision_with_sliding(
     current_x: jnp.ndarray,
-    current_y: jnp.ndarray, 
-    new_x: jnp.ndarray, 
-    new_y: jnp.ndarray, 
-    obstacles: jnp.ndarray, 
-    robot_radius: float
+    current_y: jnp.ndarray,
+    new_x: jnp.ndarray,
+    new_y: jnp.ndarray,
+    obstacles: jnp.ndarray,
+    robot_radius: float,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
     """Handle collision with sliding behavior.
-    
+
     When colliding with obstacles, slides along the edge instead of stopping completely.
-    
+
     Args:
         current_x: Current x position of the robot
         current_y: Current y position of the robot
@@ -62,7 +62,7 @@ def handle_collision_with_sliding(
         new_y: Proposed new y position (may be in collision)
         obstacles: Array of obstacle rectangles [x, y, width, height]
         robot_radius: Radius of the robot for collision detection
-        
+
     Returns:
         Tuple of (x, y) position after applying sliding logic
     """
@@ -70,27 +70,27 @@ def handle_collision_with_sliding(
     slide_x_pos = jnp.array([new_x, current_y])  # Try moving only in x direction
     slide_x_distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(slide_x_pos, obstacles)
     can_slide_x = jnp.all(slide_x_distances >= robot_radius)
-    
+
     slide_y_pos = jnp.array([current_x, new_y])  # Try moving only in y direction
     slide_y_distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(slide_y_pos, obstacles)
     can_slide_y = jnp.all(slide_y_distances >= robot_radius)
-    
+
     # If moving more horizontally than vertically, prioritize sliding in y
     movement_dx = jnp.abs(new_x - current_x)
     movement_dy = jnp.abs(new_y - current_y)
     horizontal_dominant = movement_dx >= movement_dy
-    
+
     # Apply sliding logic
     slide_x = jnp.where(
         horizontal_dominant,
         jnp.where(can_slide_y, current_x, jnp.where(can_slide_x, new_x, current_x)),
         jnp.where(can_slide_x, new_x, current_x),
     )
-    
+
     slide_y = jnp.where(
         horizontal_dominant,
         jnp.where(can_slide_y, new_y, current_y),
         jnp.where(can_slide_x, current_y, jnp.where(can_slide_y, new_y, current_y)),
     )
-    
+
     return slide_x, slide_y
