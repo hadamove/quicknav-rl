@@ -15,7 +15,7 @@ Agent = PPO | SAC | TD3
 class EvaluationResult:
     returns: jnp.ndarray
     """Returns for each episode."""
-    rendered_frames: List[env_vis.Frame] | None = None
+    rendered_frames: List[List[env_vis.Frame]] | None = None
     """Rendered frames for each episode if `render=True`."""
 
 
@@ -56,12 +56,13 @@ def evaluate_model(
 
         done = False
         episode_return = 0
+        episode_frames = []
 
         while not done:
             # Render current state to frame
             if render:
                 frame = env_vis.render_frame(state, agent.env_params)
-                frames.append(frame)
+                episode_frames.append(frame)
 
             # Choose action and step the environment
             action_key, act_subkey, step_subkey = jax.random.split(action_key, 3)
@@ -71,6 +72,7 @@ def evaluate_model(
 
         returns = returns.at[i].set(episode_return)
         reset_key = next_reset_key
+        frames.append(episode_frames)
 
     print(f"Evaluation finished, mean return: {returns.mean()}")
     if render:
