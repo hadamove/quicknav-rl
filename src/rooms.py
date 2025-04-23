@@ -27,10 +27,10 @@ class RoomParams:
     """Physical size of the room in meters"""
     grid_size: int = 16
     """Number of grid cells in each dimension"""
-    target_carved_percent: float = 0.5
+    target_carved_percent: float = 0.8
     """Target fraction of inner cells to carve out (0 to 1)"""
     num_rooms: int = 256
-    """Number of rooms to generate"""
+    """Number of rooms to generate. Half of the rooms will be used for training, the other half for evaluation."""
 
 
 def generate_rooms(key: Any, params: RoomParams) -> Tuple[jnp.ndarray, jnp.ndarray]:
