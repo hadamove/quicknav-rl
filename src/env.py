@@ -54,7 +54,7 @@ class NavigationEnvParams(environment.EnvParams):
     """Distance threshold for reaching the goal (meters)"""
     step_penalty: float = 0.1
     """Small penalty applied at each timestep to encourage efficiency"""
-    collision_penalty: float = 1.0
+    collision_penalty: float = 10.0
     """Penalty for colliding with obstacles"""
     goal_reward: float = 100.0
     """Reward for reaching the goal"""
