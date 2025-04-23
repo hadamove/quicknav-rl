@@ -93,7 +93,7 @@ def render_frame(
 
 def save_gif(frames: List[Frame] | List[List[Frame]], filename: Path, duration_per_frame: float = 0.1):
     """Save a sequence of frames as a GIF animation"""
-    if frames and isinstance(frames[0], list):
+    if len(frames) > 0 and isinstance(frames[0], list):
         # If frames is a list of lists, flatten it
         frames = [frame for episode in frames for frame in episode]
 
