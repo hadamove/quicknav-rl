@@ -1,5 +1,6 @@
 """Visualization utilities for the environment state"""
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Tuple
@@ -98,6 +99,7 @@ def save_gif(frames: List[Frame] | List[List[Frame]], filename: Path, duration_p
         frames = [frame for episode in frames for frame in episode]
 
     try:
+        os.makedirs(filename.parent, exist_ok=True)
         imageio.mimsave(filename, list(frames), duration=duration_per_frame, loop=0)
         print(f"GIF saved to {filename}")
     except Exception as e:
