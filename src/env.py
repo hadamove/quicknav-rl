@@ -222,7 +222,7 @@ class NavigationEnv(environment.Environment):
         num_rooms = params.rooms.num_rooms
         half_rooms = num_rooms // 2
 
-        min_room = jnp.where(test, half_rooms, 0)
+        min_room = jnp.where(test, half_rooms, 0)  # If test=True, use second half of rooms; if test=False, use first half
         max_room = jnp.where(test, num_rooms, half_rooms)
         room_idx = jax.random.randint(room_key, (), min_room, max_room)
 
