@@ -75,8 +75,6 @@ def evaluate_model(
         frames.append(episode_frames)
 
     print(f"Evaluation finished, mean return: {returns.mean()}")
-    if render:
-        print(f"Recorded {len(frames)} frames")
 
     return EvaluationResult(
         returns=returns,
