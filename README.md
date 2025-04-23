@@ -23,6 +23,15 @@ To format the code, you can run:
 uvx ruff format
 ```
 
+## Pre-commit hooks
+
+Pre-commit hook is set-up automatically strip output cells from Jupyter notebooks before committing so that the 10 MB gifs from notebook are no longer accidentally uploaded to git 💀
+
+To install the pre-commit hooks (already included in dev dependencies):
+```bash
+pre-commit install
+```
+
 ## Running
 
 To get started, checkout `examples/intro.ipynb` for a quick introduction to training the agent, evaluation and visualization of the environment.

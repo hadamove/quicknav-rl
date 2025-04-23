@@ -13,6 +13,8 @@ dependencies = ["imageio>=2.37.0", "rejax>=0.1.1"]
 [dependency-groups]
 dev = [
     "ipykernel>=6.29.5",
+    "nbstripout>=0.8.1",
+    "pre-commit>=4.2.0",
     "ruff>=0.11.2",
 ]
 
