@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Tuple
 
 import imageio
 import numpy as np
@@ -91,8 +91,12 @@ def render_frame(
     return np.array(img.resize((img_width, img_height), resample=Image.Resampling.LANCZOS))
 
 
-def save_gif(frames: Sequence[Frame], filename: Path, duration_per_frame: float = 0.1):
+def save_gif(frames: List[Frame] | List[List[Frame]], filename: Path, duration_per_frame: float = 0.1):
     """Save a sequence of frames as a GIF animation"""
+    if frames and isinstance(frames[0], list):
+        # If frames is a list of lists, flatten it
+        frames = [frame for episode in frames for frame in episode]
+
     try:
         imageio.mimsave(filename, list(frames), duration=duration_per_frame, loop=0)
         print(f"GIF saved to {filename}")
