@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from flax.training.train_state import TrainState
 from rejax import PPO, SAC, TD3
 
-import env_vis
+import quicknav_utils.env_vis as env_vis
 
 Agent = PPO | SAC | TD3
 
