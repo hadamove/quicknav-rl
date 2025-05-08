@@ -3,11 +3,12 @@ Lidar simulation module for robot environment.
 Provides ray-casting functionality and collision detection.
 """
 
-from enum import IntEnum
 from typing import Protocol, Tuple
 
 import jax
 import jax.numpy as jnp
+
+from quicknav_utils.collision import Collision
 
 
 class LidarParams(Protocol):
@@ -18,15 +19,6 @@ class LidarParams(Protocol):
     lidar_max_distance: float
     goal_tolerance: float
     robot_radius: float
-
-
-# Enum for collision types
-class Collision(IntEnum):
-    """Enumeration of possible collision types for lidar beams."""
-
-    MaxDist = 0  # No collision, max distance reached
-    Obstacle = 1  # Collision with obstacle
-    Goal = 2  # Collision with goal
 
 
 def simulate_lidar(

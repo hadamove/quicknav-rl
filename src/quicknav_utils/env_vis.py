@@ -1,16 +1,28 @@
-"""Visualization utilities for the environment state"""
+"""Visualization utilities for the environment state
+
+Works with both JAX and NumPy implementations of the environment.
+"""
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple
 
 import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from env import EnvState, NavigationEnvParams
-from lidar import Collision
+if TYPE_CHECKING:
+    import quicknav_jax as env_jax
+    import quicknav_numpy as env_np
+
+    EnvState = env_jax.EnvState | env_np.EnvState
+    NavigationEnvParams = env_jax.NavigationEnvParams | env_np.NavigationEnvParams
+else:
+    EnvState = Any
+    NavigationEnvParams = Any
+
+from .collision import Collision
 
 # Type alias for RGB color values
 RGBColor = Tuple[int, int, int]
@@ -144,7 +156,7 @@ def _draw_lidar(
     for i, angle in enumerate(beam_angles):
         dx, dy = np.cos(angle), np.sin(angle)
         d = float(state.lidar_distances[i])
-        collision_type = state.lidar_collision_types[i]
+        collision_type = int(state.lidar_collision_types[i])
 
         # Determine beam color based on collision type
         color = _get_beam_color(Collision(collision_type), theme)
