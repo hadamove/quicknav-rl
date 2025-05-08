@@ -1,31 +1,35 @@
-# QuickNav RL Environment
+# QuickNav - Robot Navigation in JAX
 
-This repository contains a robot navigation environment for reinforcement learning, with two implementations:
+> TODO: possibly better project name
 
-1. **JAX Implementation** (`quicknav_jax`): Highly optimized for parallel simulations and compatible with the gymnax interface.
-2. **NumPy Implementation** (`quicknav_numpy`): Sequential implementation compatible with the gymnasium interface.
+This repository contains a JAX implementation of the robot navigation problem. The goal is to navigate a robot in a 2D grid world with obstacles, using reinforcement learning techniques.
 
-The environment simulates a differential drive robot navigating in a room with obstacles, using lidar for sensing. The goal is to reach a target position while avoiding obstacles.
+## Demo
 
-## Features
-
-- Differential drive robot physics
-- Lidar-based obstacle sensing
-- Procedurally generated room layouts
-- Customizable environment parameters
-- Support for both JAX and NumPy backends
+![Demo](./media/demo.gif)
 
 ## Installation
 
+1. Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
+2. Afterwards, create a new virtual environment and install the dependencies using `uv`:
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/quicknav-rl.git
-cd quicknav-rl
+uv sync
+```
 
-# Install dependencies
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e .
+> Alternatively, you can use `poetry` or anything that works with `pyproject.toml` (but `uv` is ultra superior!)
+
+To format the code, you can run:
+```bash
+uvx ruff format
+```
+
+## Pre-commit hooks
+
+Pre-commit hook is set-up automatically strip output cells from Jupyter notebooks before committing so that the 10 MB gifs from notebook are no longer accidentally uploaded to git 💀
+
+To install the pre-commit hooks (already included in dev dependencies):
+```bash
+pre-commit install
 ```
 
 ## Running
