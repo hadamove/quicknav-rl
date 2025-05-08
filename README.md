@@ -1,58 +1,109 @@
-# QuickNav - Robot Navigation in JAX
+# QuickNav RL Environment
 
-> TODO: possibly better project name
+This repository contains a robot navigation environment for reinforcement learning, with two implementations:
 
-This repository contains a JAX implementation of the robot navigation problem. The goal is to navigate a robot in a 2D grid world with obstacles, using reinforcement learning techniques.
+1. **JAX Implementation** (`quicknav_jax`): Highly optimized for parallel simulations and compatible with the gymnax interface.
+2. **NumPy Implementation** (`quicknav_numpy`): Sequential implementation compatible with the gymnasium interface.
 
-## Demo
+The environment simulates a differential drive robot navigating in a room with obstacles, using lidar for sensing. The goal is to reach a target position while avoiding obstacles.
 
-![Demo](./media/demo.gif)
+## Features
+
+- Differential drive robot physics
+- Lidar-based obstacle sensing
+- Procedurally generated room layouts
+- Customizable environment parameters
+- Support for both JAX and NumPy backends
 
 ## Installation
 
-1. Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
-2. Afterwards, create a new virtual environment and install the dependencies using `uv`:
 ```bash
-uv sync
+# Clone the repository
+git clone https://github.com/yourusername/quicknav-rl.git
+cd quicknav-rl
+
+# Install dependencies
+uv venv .venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
-> Alternatively, you can use `poetry` or anything that works with `pyproject.toml` (but `uv` is ultra superior!)
+## Quick Start
 
-To format the code, you can run:
-```bash
-uvx ruff format
+### Using the NumPy Implementation
+
+```python
+import numpy as np
+from quicknav_numpy import NavigationEnv, NavigationEnvParams, RoomParams, generate_rooms
+
+# Generate room layouts
+rng = np.random.default_rng(42)
+room_params = RoomParams(num_rooms=16)
+obstacles, free_positions = generate_rooms(rng, room_params)
+
+# Create environment parameters with the generated rooms
+env_params = NavigationEnvParams(
+    rooms=room_params,
+    obstacles=obstacles,
+    free_positions=free_positions,
+)
+
+# Create the environment
+env = NavigationEnv(params=env_params, seed=42)
+
+# Run an episode
+obs, info = env.reset()
+done = False
+total_reward = 0
+
+while not done:
+    action = env.action_space.sample()  # Replace with your agent's action
+    obs, reward, terminated, truncated, info = env.step(action)
+    total_reward += reward
+    done = terminated or truncated
+
+print(f"Episode finished with reward: {total_reward}")
 ```
 
-## Pre-commit hooks
+### Using the JAX Implementation
 
-Pre-commit hook is set-up automatically strip output cells from Jupyter notebooks before committing so that the 10 MB gifs from notebook are no longer accidentally uploaded to git 💀
+```python
+import jax
+import jax.numpy as jnp
+from quicknav_jax import NavigationEnv, NavigationEnvParams
 
-To install the pre-commit hooks (already included in dev dependencies):
-```bash
-pre-commit install
+# Set up environment
+env = NavigationEnv()
+params = env.default_params
+
+# Reset the environment
+key = jax.random.PRNGKey(42)
+key, subkey = jax.random.split(key)
+obs, state = env.reset(subkey, params)
+
+# Run an episode
+done = False
+total_reward = 0.0
+
+while not done:
+    key, subkey = jax.random.split(key)
+    action = jax.random.uniform(subkey, shape=(2,), minval=-1.0, maxval=1.0)
+    
+    obs, state, reward, done, info = env.step(subkey, state, action, params)
+    total_reward += reward
+
+print(f"Episode finished with reward: {total_reward}")
 ```
 
-## Running
+## Environment Parameters
 
-To get started, checkout `examples/intro.ipynb` for a quick introduction to training the agent, evaluation and visualization of the environment.
-Choose python from `.venv` as interpreter and it should work out of the box.
+The environment can be customized using the `NavigationEnvParams` class:
 
-## TODO
+- **Robot parameters**: wheel_base, max_wheel_speed, robot_radius, dt
+- **Sensor parameters**: lidar_num_beams, lidar_fov, lidar_max_distance
+- **Reward parameters**: goal_tolerance, step_penalty, collision_penalty, goal_reward
+- **Episode parameters**: max_steps_in_episode
 
-- [x] Randomized start and goal positions
-- [x] Randomized obstacles (walls) generation
-    - [x] Simulate lidar sensor to detect walls and avoid them
-    - [x] Add negative reward for hitting walls
-    - [x] Add walls to visualization
-- [x] "Better" walls - something that actually resembles a real world room not just random rectangles 😆
-- [x] Better observations for the policy (currently position & rotation of the robot + position of the goal)
-    - [x] Maybe include rotation and/or distance of the goal
-- [ ] Try different reward weights
-    - [ ] Penalization for going back (i.e. backtracking)
-- [ ] W&B integration -- see https://github.com/keraJLi/rejax/blob/main/examples/wandb_integration.py
-    - [ ] Essentially just copy/reimplement a `wandb_callback` like in that file (might be outdated)
-- [ ] Add support for decimation/frame skipping in the environment (policy predicts 1 action, but environment takes N steps with that action)
-    - Making decisions too frequently makes it harder to relate which actions led to which outcome. Longer actions or actions that persist allow the agent to plan from a higher level at a cost of delayed response.
-    - This will allow us to lower `env_params.dt` to 0.01 or even lower, which will make the simulation look smoother
-- [ ] Experiment with different algorithms (currently we use PPO, good alternatives are PQN, SAC, TD3)
-- [ ] Experiment with a different NN architecture (currently we use default 2 hidden layers (64, 64), see `ppo.config` in `intro.ipynb`)
+## License
+
+MIT
