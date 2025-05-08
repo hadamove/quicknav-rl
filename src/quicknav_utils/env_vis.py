@@ -1,4 +1,7 @@
-"""Visualization utilities for the environment state"""
+"""Visualization utilities for the environment state
+
+Works with both JAX and NumPy implementations of the environment.
+"""
 
 import os
 from dataclasses import dataclass
@@ -9,7 +12,10 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from quicknav_jax import Collision, EnvState, NavigationEnvParams
+import quicknav_jax as env_jax
+import quicknav_numpy as env_np
+
+from .collision import Collision
 
 # Type alias for RGB color values
 RGBColor = Tuple[int, int, int]
@@ -39,8 +45,8 @@ Point = Tuple[float, float]
 
 
 def render_frame(
-    state: EnvState,
-    params: NavigationEnvParams,
+    state: env_jax.EnvState | env_np.EnvState,
+    params: env_jax.NavigationEnvParams | env_np.NavigationEnvParams,
     img_width: int = 600,
     img_height: int = 600,
     theme: Theme = Theme(),
@@ -126,7 +132,7 @@ def _draw_goal(
 
 def _draw_lidar(
     draw: ImageDraw.ImageDraw,
-    state: EnvState,
+    state: env_jax.EnvState | env_np.EnvState,
     lidar_fov: float,
     lidar_num_beams: int,
     scale: float,
@@ -141,7 +147,7 @@ def _draw_lidar(
     for i, angle in enumerate(beam_angles):
         dx, dy = np.cos(angle), np.sin(angle)
         d = float(state.lidar_distances[i])
-        collision_type = state.lidar_collision_types[i]
+        collision_type = int(state.lidar_collision_types[i])
 
         # Determine beam color based on collision type
         color = _get_beam_color(Collision(collision_type), theme)
@@ -251,7 +257,7 @@ def _get_polygon_pixels(
 
 def _draw_path(
     draw: ImageDraw.ImageDraw,
-    state: EnvState,
+    state: env_jax.EnvState | env_np.EnvState,
     scale: float,
     img_height: int,
     theme: Theme,
