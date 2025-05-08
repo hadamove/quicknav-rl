@@ -4,7 +4,7 @@ This module provides functions to generate room layouts using numpy.
 """
 
 from enum import IntEnum
-from typing import Any, Dict, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 

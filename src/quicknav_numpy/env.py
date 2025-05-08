@@ -1,6 +1,6 @@
 """Numpy environment for differential drive robot navigation with lidar sensing."""
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -145,9 +145,6 @@ class NavigationEnv(gym.Env):
         self.state = None
         self.random_state = np.random.RandomState(seed)
 
-        # Define observation and action spaces
-        observation_dims = 8 + self.params.lidar_num_beams * 2
-
         # Lower bounds for observation
         low = np.concatenate(
             [
@@ -198,6 +195,8 @@ class NavigationEnv(gym.Env):
         Returns:
             Tuple of (observation, reward, terminated, truncated, info)
         """
+        assert self.state is not None
+
         # 1. Physics update
         action = np.clip(action, -self.params.max_wheel_speed, self.params.max_wheel_speed)
         v_left, v_right = action
@@ -228,7 +227,7 @@ class NavigationEnv(gym.Env):
             new_x, new_y = slide_x, slide_y
 
         # 3. Reward calculation
-        reward, goal_reached = self._calculate_reward(new_x, new_y, collision)
+        reward, goal_reached = self._calculate_reward(new_x, new_y, bool(collision))
 
         # 4. Terminal state check
         out_of_time = self.state.steps + 1 >= self.params.max_steps_in_episode
@@ -284,6 +283,8 @@ class NavigationEnv(gym.Env):
         Returns:
             Tuple of (reward, goal_reached)
         """
+        assert self.state is not None
+
         # Calculate distance to goal before and after movement
         prev_dist = np.sqrt((self.state.x - self.state.goal_x) ** 2 + (self.state.y - self.state.goal_y) ** 2)
         new_dist = np.sqrt((new_x - self.state.goal_x) ** 2 + (new_y - self.state.goal_y) ** 2)
@@ -383,6 +384,8 @@ class NavigationEnv(gym.Env):
 
     def _get_obs(self) -> np.ndarray:
         """Convert state to observation vector."""
+        assert self.state is not None
+
         # Robot pose (x, y, sin, cos)
         pose = np.array([self.state.x, self.state.y, np.sin(self.state.theta), np.cos(self.state.theta)])
 
