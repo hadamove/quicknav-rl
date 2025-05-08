@@ -41,6 +41,9 @@ class NavigationEnvParams:
         goal_reward: float = 100.0,
         # Episode parameters
         max_steps_in_episode: int = 300,
+        # Spawn parameters
+        robot_spawn_pos: Optional[Tuple[float, float]] = None,
+        goal_spawn_pos: Optional[Tuple[float, float]] = None,
     ):
         """Initialize environment parameters."""
         # Robot parameters
@@ -77,6 +80,9 @@ class NavigationEnvParams:
         # Episode parameters
         self.max_steps_in_episode = max_steps_in_episode
 
+        # Spawn parameters
+        self.robot_spawn_pos = robot_spawn_pos  # Optional fixed spawn position for the robot [x, y]. If None, position is sampled randomly.
+        self.goal_spawn_pos = goal_spawn_pos  # Optional fixed spawn position for the goal [x, y]. If None, position is sampled randomly.
 
 class EnvState:
     """Environment state for the differential drive robot navigation task.
@@ -335,12 +341,24 @@ class NavigationEnv(gym.Env):
         obstacles = self.params.obstacles[room_idx]
         free_positions = self.params.free_positions[room_idx]
 
-        # Sample positions for robot and goal separately
-        robot_pos = sample_position(self.random_state, free_positions)
-        goal_pos = sample_position(self.random_state, free_positions)
+        # Sample positions for robot and goal
+        # Use provided spawn position for robot if available, otherwise sample randomly
+        if self.params.robot_spawn_pos is not None:
+            robot_pos = self.params.robot_spawn_pos
+        else:
+            robot_pos = sample_position(self.random_state, free_positions)
 
-        # Randomly initialize robot orientation
-        robot_angle = self.random_state.uniform(0, 2 * np.pi)
+        # Use provided spawn position for goal if available, otherwise sample randomly
+        if self.params.goal_spawn_pos is not None:
+            goal_pos = self.params.goal_spawn_pos
+        else:
+            goal_pos = sample_position(self.random_state, free_positions)
+
+        # Randomly initialize robot orientation unless fixed spawn position is provided
+        if self.params.robot_spawn_pos is None:
+            robot_angle = self.random_state.uniform(0, 2 * np.pi)
+        else:
+            robot_angle = 0.0
 
         # Initialize position history with robot's starting position in first slot, zeros elsewhere
         position_history = np.zeros((self.params.max_steps_in_episode, 2))

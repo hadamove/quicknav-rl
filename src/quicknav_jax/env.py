@@ -1,6 +1,6 @@
 """JAX environment for differential drive robot navigation with lidar sensing."""
 
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import chex
 import jax
@@ -12,6 +12,8 @@ from .geometry import handle_collision_with_sliding, point_to_rectangle_distance
 from .lidar import Collision, simulate_lidar
 from .rooms import RoomParams, sample_position
 
+NotFixed = jnp.array([-1.0, -1.0])
+"""Sentinel value to determine if a spawn position is not fixed."""
 
 @struct.dataclass
 class NavigationEnvParams(environment.EnvParams):
@@ -62,6 +64,13 @@ class NavigationEnvParams(environment.EnvParams):
     # Episode parameters
     max_steps_in_episode: int = struct.field(pytree_node=False, default=300)
     """Maximum number of steps before episode terminates"""
+
+    # Spawn parameters
+    robot_spawn_pos: jnp.ndarray = struct.field(pytree_node=False, default=NotFixed)
+    """Fixed spawn position for the robot [x, y]. If [-1, -1] (default), position is sampled randomly."""
+
+    goal_spawn_pos: jnp.ndarray = struct.field(pytree_node=False, default=NotFixed)
+    """Fixed spawn position for the goal [x, y]. If [-1, -1] (default), position is sampled randomly."""
 
 
 @struct.dataclass
@@ -232,13 +241,27 @@ class NavigationEnv(environment.Environment):
         obstacles = params.obstacles[room_idx]
         free_positions = params.free_positions[room_idx]
 
-        # Sample positions for robot and goal separately
-        key_start, key_goal = jax.random.split(pos_key)
-        robot_pos = sample_position(key_start, free_positions)
-        goal_pos = sample_position(key_goal, free_positions)
+        # Sample positions for robot and goal
+        # Use provided spawn position for robot if not the sentinel value, otherwise sample randomly
+        robot_pos = jnp.where(
+            jnp.all(params.robot_spawn_pos == NotFixed),
+            sample_position(pos_key, free_positions),
+            params.robot_spawn_pos
+        )
 
-        # Randomly initialize robot orientation
-        robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
+        # Sample goal position randomly unless fixed spawn position is provided
+        goal_pos = jnp.where(
+            jnp.all(params.goal_spawn_pos == NotFixed),
+            sample_position(pos_key, free_positions),
+            params.goal_spawn_pos
+        )
+
+        # Sample robot orientation randomly unless fixed spawn position is provided
+        robot_angle = jnp.where(
+            jnp.all(params.robot_spawn_pos == NotFixed),
+            jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi),
+            0.0,
+        )
 
         # Initialize position history with robot's starting position in first slot, zeros elsewhere
         position_history = jnp.zeros((params.max_steps_in_episode, 2))
