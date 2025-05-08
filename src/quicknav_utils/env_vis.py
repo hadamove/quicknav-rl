@@ -6,14 +6,21 @@ Works with both JAX and NumPy implementations of the environment.
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple
 
 import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-import quicknav_jax as env_jax
-import quicknav_numpy as env_np
+if TYPE_CHECKING:
+    import quicknav_jax as env_jax
+    import quicknav_numpy as env_np
+
+    EnvState = env_jax.EnvState | env_np.EnvState
+    NavigationEnvParams = env_jax.NavigationEnvParams | env_np.NavigationEnvParams
+else:
+    EnvState = Any
+    NavigationEnvParams = Any
 
 from .collision import Collision
 
@@ -45,8 +52,8 @@ Point = Tuple[float, float]
 
 
 def render_frame(
-    state: env_jax.EnvState | env_np.EnvState,
-    params: env_jax.NavigationEnvParams | env_np.NavigationEnvParams,
+    state: EnvState,
+    params: NavigationEnvParams,
     img_width: int = 600,
     img_height: int = 600,
     theme: Theme = Theme(),
@@ -132,7 +139,7 @@ def _draw_goal(
 
 def _draw_lidar(
     draw: ImageDraw.ImageDraw,
-    state: env_jax.EnvState | env_np.EnvState,
+    state: EnvState,
     lidar_fov: float,
     lidar_num_beams: int,
     scale: float,
@@ -257,7 +264,7 @@ def _get_polygon_pixels(
 
 def _draw_path(
     draw: ImageDraw.ImageDraw,
-    state: env_jax.EnvState | env_np.EnvState,
+    state: EnvState,
     scale: float,
     img_height: int,
     theme: Theme,
