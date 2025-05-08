@@ -9,8 +9,7 @@ import imageio
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from env import EnvState, NavigationEnvParams
-from lidar import Collision
+from quicknav_jax import Collision, EnvState, NavigationEnvParams
 
 # Type alias for RGB color values
 RGBColor = Tuple[int, int, int]

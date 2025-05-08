@@ -8,9 +8,9 @@ import jax.numpy as jnp
 from flax import struct
 from gymnax.environments import environment, spaces
 
-from geometry import handle_collision_with_sliding, point_to_rectangle_distance
-from lidar import Collision, simulate_lidar
-from rooms import RoomParams, sample_position
+from .geometry import handle_collision_with_sliding, point_to_rectangle_distance
+from .lidar import Collision, simulate_lidar
+from .rooms import RoomParams, sample_position
 
 
 @struct.dataclass
@@ -222,7 +222,9 @@ class NavigationEnv(environment.Environment):
         num_rooms = params.rooms.num_rooms
         half_rooms = num_rooms // 2
 
-        min_room = jnp.where(test, half_rooms, 0)  # If test=True, use second half of rooms; if test=False, use first half
+        min_room = jnp.where(
+            test, half_rooms, 0
+        )  # If test=True, use second half of rooms; if test=False, use first half
         max_room = jnp.where(test, num_rooms, half_rooms)
         room_idx = jax.random.randint(room_key, (), min_room, max_room)
 
