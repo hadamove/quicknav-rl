@@ -406,13 +406,9 @@ class NavigationEnv(gym.Env):
         return np.concatenate([pose, goal, goal_relative, self.state.lidar_distances, lidar_goal])
 
     def render(self):
-        """Render the environment."""
-        # This is just a placeholder - rendering would need to be implemented
-        # with your preferred library (e.g., Pygame, matplotlib)
-        if self.render_mode == "human":
-            pass  # Implement human rendering
-        elif self.render_mode == "rgb_array":
-            return np.zeros((300, 300, 3))  # Placeholder array
+        raise NotImplementedError(
+            "Rendering is not implemented directly in this file, please use `env_vis.py` instead."
+        )
 
     def close(self):
         """Clean up resources."""
