@@ -117,17 +117,19 @@ def save_best_params(study: optuna.Study, algorithm: str) -> None:
     print(f"\nBest parameters saved to {txt_path}")
 
 
-def run_optimization(algorithm: str, agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int) -> None:
+def run_optimization(agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int) -> None:
     """Run the hyperparameter optimization"""
+    algo_name = agent_class.__name__
+
     # Create study name and storage path based on algorithm
-    study_name = f"{algorithm}_optimization"
+    study_name = f"{algo_name}_optimization"
 
     # Create database directory if it doesn't exist
     db_dir = OUTPUT_DIR / "db"
     db_dir.mkdir(parents=True, exist_ok=True)
 
     # Use absolute path for SQLite database
-    db_path = db_dir / f"{algorithm}_study.db"
+    db_path = db_dir / f"{algo_name}_study.db"
     storage_name = f"sqlite:///{db_path.absolute()}"
 
     # Create or load a study
@@ -142,7 +144,7 @@ def run_optimization(algorithm: str, agent_class: AgentClass, search_space: Sear
     )
 
     # Run optimization
-    print(f"Starting optimization of {algorithm.upper()} with {n_trials} trials")
+    print(f"Starting optimization of {algo_name.upper()} with {n_trials} trials")
     print(f"Run `optuna-dashboard {storage_name}` to open the dashboard")
 
     # Create and optimize with algorithm-specific objective
@@ -154,4 +156,4 @@ def run_optimization(algorithm: str, agent_class: AgentClass, search_space: Sear
     print(f"Best mean return: {study.best_value:.4f}")
     print(f"Best hyperparameters: {study.best_params}")
 
-    save_best_params(study, algorithm)
+    save_best_params(study, algo_name)

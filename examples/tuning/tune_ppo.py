@@ -28,7 +28,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Run the optimization
-    run_optimization(algorithm="ppo", agent_class=PPO, search_space=ppo_search_space, n_trials=args.trials)
+    run_optimization(agent_class=PPO, search_space=ppo_search_space, n_trials=args.trials)
 
 
 if __name__ == "__main__":

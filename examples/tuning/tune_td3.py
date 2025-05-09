@@ -28,7 +28,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # Run the optimization
-    run_optimization(algorithm="td3", agent_class=TD3, search_space=td3_search_space, n_trials=args.trials)
+    run_optimization(agent_class=TD3, search_space=td3_search_space, n_trials=args.trials)
 
 
 if __name__ == "__main__":
