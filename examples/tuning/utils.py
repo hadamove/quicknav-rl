@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Type, Union
 
 import jax
 import optuna
-from rejax import PPO, SAC
+from rejax import PPO, SAC, TD3
 
 from quicknav_jax import NavigationEnv, NavigationEnvParams, RoomParams, generate_rooms
 from quicknav_jax.eval import evaluate_model
@@ -21,7 +21,7 @@ N_EVAL_EPISODES = 10
 OUTPUT_DIR = Path("examples/temp/tuning_results")
 
 # Type aliases
-AgentClass = Union[Type[PPO], Type[SAC]]
+AgentClass = Union[Type[PPO], Type[SAC], Type[TD3]]
 SearchSpaceFunc = Callable[[optuna.Trial], Dict[str, Any]]
 
 
