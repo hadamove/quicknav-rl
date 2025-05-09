@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 import optuna
 from rejax import PPO
-from utils import N_TRIALS, run_optimization
+from utils import run_optimization
 
 
 def ppo_search_space(trial: optuna.Trial) -> Dict[str, Any]:
@@ -23,7 +23,7 @@ def ppo_search_space(trial: optuna.Trial) -> Dict[str, Any]:
 def main() -> None:
     """Main function to run the hyperparameter optimization for PPO."""
     parser = argparse.ArgumentParser(description="Tune PPO hyperparameters")
-    parser.add_argument("--trials", "-t", type=int, default=N_TRIALS, help="Number of trials to run")
+    parser.add_argument("--trials", "-t", type=int, default=200, help="Number of trials to run")
     args = parser.parse_args()
 
     # Run the optimization

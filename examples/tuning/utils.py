@@ -1,7 +1,7 @@
 """Common utilities for hyperparameter tuning of RL algorithms."""
 
 import json
-import os
+from pathlib import Path
 from typing import Any, Callable, Dict, Type, Union
 
 import jax
@@ -14,9 +14,11 @@ from quicknav_jax.eval import evaluate_model
 # Set up constants
 ROOM_SEED = 42
 EVAL_SEED = 77
-N_TRIALS = 100
-MAX_TIMESTEPS = 500_000
+N_TIMESTEPS = 500_000
 N_EVAL_EPISODES = 10
+
+# Output directory
+OUTPUT_DIR = Path("examples/temp/tuning")
 
 # Type aliases
 AgentClass = Union[Type[PPO], Type[SAC]]
@@ -49,7 +51,7 @@ def create_objective(agent_class: AgentClass, get_search_space: SearchSpaceFunc)
         config = {
             "env": env,
             "env_params": env_params,
-            "total_timesteps": MAX_TIMESTEPS,
+            "total_timesteps": N_TIMESTEPS,
             "normalize_observations": True,
             "num_envs": 512,
             "agent_kwargs": {
@@ -95,34 +97,44 @@ def save_best_params(study: optuna.Study, algorithm: str) -> None:
     """Save the best parameters from the study"""
     best_params = study.best_params
 
-    # Create 'results' directory if it doesn't exist
-    os.makedirs("results", exist_ok=True)
+    # Create output directory if it doesn't exist
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Define output file paths
+    json_path = OUTPUT_DIR / f"best_{algorithm}_params.json"
+    txt_path = OUTPUT_DIR / f"best_{algorithm}_params.txt"
 
     # Save best parameters as JSON file
-    with open(f"results/best_{algorithm}_params.json", "w") as f:
+    with open(json_path, "w") as f:
         json.dump(best_params, f, indent=4)
 
     # Also save as text file for easy reading
-    with open(f"results/best_{algorithm}_params.txt", "w") as f:
+    with open(txt_path, "w") as f:
         f.write(f"Best {algorithm.upper()} parameters (mean return: {study.best_value:.4f}):\n")
         for param, value in best_params.items():
             f.write(f"{param}: {value}\n")
 
-    print(f"\nBest parameters saved to results/best_{algorithm}_params.txt")
+    print(f"\nBest parameters saved to {txt_path}")
 
 
 def run_optimization(
-    algorithm: str, agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int = N_TRIALS
+    algorithm: str, agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int
 ) -> None:
     """Run the hyperparameter optimization"""
     # Create study name and storage path based on algorithm
     study_name = f"{algorithm}_optimization"
-    storage_name = f"sqlite:///{algorithm}_study.db"
+
+    # Create database directory if it doesn't exist
+    db_dir = OUTPUT_DIR / "db"
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use absolute path for SQLite database
+    db_path = db_dir / f"{algorithm}_study.db"
+    storage_name = f"sqlite:///{db_path.absolute()}"
 
     # Create or load a study
     sampler = optuna.samplers.TPESampler(seed=42)  # TPE sampler implements Bayesian optimization
 
-    os.makedirs("results", exist_ok=True)
     study = optuna.create_study(
         study_name=study_name,
         storage=storage_name,
