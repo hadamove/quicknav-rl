@@ -1,6 +1,6 @@
 """JAX environment for differential drive robot navigation with lidar sensing."""
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import chex
 import jax
@@ -14,6 +14,7 @@ from .rooms import RoomParams, sample_distant_position, sample_position
 
 NotFixed = jnp.array([-1.0, -1.0])
 """Sentinel value to determine if a spawn position is not fixed."""
+
 
 @struct.dataclass
 class NavigationEnvParams(environment.EnvParams):
@@ -248,14 +249,14 @@ class NavigationEnv(environment.Environment):
         robot_pos = jnp.where(
             jnp.all(params.robot_spawn_pos == NotFixed),
             sample_position(pos_key, free_positions),
-            params.robot_spawn_pos
+            params.robot_spawn_pos,
         )
 
         # Sample goal position randomly unless fixed spawn position is provided
         goal_pos = jnp.where(
             jnp.all(params.goal_spawn_pos == NotFixed),
             sample_distant_position(pos_key, free_positions, robot_pos),
-            params.goal_spawn_pos
+            params.goal_spawn_pos,
         )
 
         # Sample robot orientation randomly unless fixed spawn position is provided

@@ -82,7 +82,10 @@ class NavigationEnvParams:
 
         # Spawn parameters
         self.robot_spawn_pos = robot_spawn_pos  # Optional fixed spawn position for the robot [x, y]. If None, position is sampled randomly.
-        self.goal_spawn_pos = goal_spawn_pos  # Optional fixed spawn position for the goal [x, y]. If None, position is sampled randomly.
+        self.goal_spawn_pos = (
+            goal_spawn_pos  # Optional fixed spawn position for the goal [x, y]. If None, position is sampled randomly.
+        )
+
 
 class EnvState:
     """Environment state for the differential drive robot navigation task.
