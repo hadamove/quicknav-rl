@@ -147,7 +147,7 @@ def _draw_lidar(
     img_height: int,
     aa_scale: int,
     theme: Theme,
-    params: EnvParams,
+    params: NavigationEnvParams,
 ):
     """Draw lidar beams with their collision types."""
     fov_rad = np.radians(lidar_fov)
