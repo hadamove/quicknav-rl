@@ -117,9 +117,7 @@ def save_best_params(study: optuna.Study, algorithm: str) -> None:
     print(f"\nBest parameters saved to {txt_path}")
 
 
-def run_optimization(
-    algorithm: str, agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int
-) -> None:
+def run_optimization(algorithm: str, agent_class: AgentClass, search_space: SearchSpaceFunc, n_trials: int) -> None:
     """Run the hyperparameter optimization"""
     # Create study name and storage path based on algorithm
     study_name = f"{algorithm}_optimization"
