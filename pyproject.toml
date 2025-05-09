@@ -13,6 +13,7 @@ dependencies = [
     "rejax>=0.1.1",
     "jax[cuda]==0.5.3",
     "optuna>=4.3.0",
+    "optuna-dashboard>=0.18.0",
 ]
 
 [dependency-groups]
