@@ -16,6 +16,8 @@ def sac_search_space(trial: optuna.Trial) -> Dict[str, Any]:
         "buffer_size": trial.suggest_categorical("buffer_size", [50_000, 100_000, 200_000, 500_000]),
         "polyak": trial.suggest_float("polyak", 0.9, 0.999),
         "target_entropy_ratio": trial.suggest_float("target_entropy_ratio", 0.5, 1.0),
+        "target_update_freq": trial.suggest_categorical("target_update_freq", [1, 2, 3, 4]),
+        "gamma": trial.suggest_float("gamma", 0.9, 0.999),
     }
 
 

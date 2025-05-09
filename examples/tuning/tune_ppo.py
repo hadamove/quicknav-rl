@@ -17,6 +17,7 @@ def ppo_search_space(trial: optuna.Trial) -> Dict[str, Any]:
         "gae_lambda": trial.suggest_float("gae_lambda", 0.9, 1.0),
         "ent_coef": trial.suggest_float("ent_coef", 0.0, 0.1),
         "clip_eps": trial.suggest_float("clip_eps", 0.1, 0.3),
+        "gamma": trial.suggest_float("gamma", 0.9, 0.999),
     }
 
 
