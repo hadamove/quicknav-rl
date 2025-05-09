@@ -18,7 +18,7 @@ N_TIMESTEPS = 500_000
 N_EVAL_EPISODES = 10
 
 # Output directory
-OUTPUT_DIR = Path("examples/temp/tuning")
+OUTPUT_DIR = Path("examples/temp/tuning_results")
 
 # Type aliases
 AgentClass = Union[Type[PPO], Type[SAC]]
