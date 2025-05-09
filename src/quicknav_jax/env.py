@@ -1,6 +1,6 @@
 """JAX environment for differential drive robot navigation with lidar sensing."""
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import chex
 import jax
