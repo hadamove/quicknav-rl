@@ -32,5 +32,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # To run: `uv examples/tuning/tune_sac.py`
+    # To run: `uv run examples/tuning/tune_sac.py`
     main()

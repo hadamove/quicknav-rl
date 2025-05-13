@@ -32,5 +32,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # To run: `python examples/tuning/tune_td3.py`
-    main() 
+    # To run: `uv run examples/tuning/tune_td3.py`
+    main()
