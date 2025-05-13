@@ -18,6 +18,11 @@ def sac_search_space(trial: optuna.Trial) -> Dict[str, Any]:
         "target_entropy_ratio": trial.suggest_float("target_entropy_ratio", 0.5, 1.0),
         "target_update_freq": trial.suggest_categorical("target_update_freq", [1, 2, 3, 4]),
         "gamma": trial.suggest_float("gamma", 0.9, 0.999),
+        # fixed parameters
+        "normalize_observations": True,
+        "agent_kwargs": {
+            "hidden_layer_sizes": (128, 128),
+        },
     }
 
 

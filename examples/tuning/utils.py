@@ -15,6 +15,7 @@ from quicknav_jax.eval import evaluate_model
 ROOM_SEED = 42
 EVAL_SEED = 77
 N_TIMESTEPS = 500_000
+N_ENVS = 512
 N_EVAL_EPISODES = 10
 
 # Output directory
@@ -52,11 +53,7 @@ def create_objective(agent_class: AgentClass, get_search_space: SearchSpaceFunc)
             "env": env,
             "env_params": env_params,
             "total_timesteps": N_TIMESTEPS,
-            "normalize_observations": True,
-            "num_envs": 512,
-            "agent_kwargs": {
-                "hidden_layer_sizes": (128, 128),
-            },
+            "num_envs": N_ENVS,
             **params,
         }
 

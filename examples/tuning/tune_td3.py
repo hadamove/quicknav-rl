@@ -18,6 +18,14 @@ def td3_search_space(trial: optuna.Trial) -> Dict[str, Any]:
         "polyak": trial.suggest_float("polyak", 0.9, 0.999),
         "target_noise": trial.suggest_float("target_noise", 0.1, 0.4),
         "policy_delay": trial.suggest_categorical("policy_delay", [1, 2, 3, 4]),
+        # fixed parameters
+        "normalize_observations": True,
+        "actor_kwargs": {
+            "hidden_layer_sizes": (128, 128),
+        },
+        "critic_kwargs": {
+            "hidden_layer_sizes": (128, 128),
+        },
     }
 
 
