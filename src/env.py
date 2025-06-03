@@ -1,6 +1,7 @@
 """JAX environment for differential drive robot navigation with lidar sensing."""
 
-from typing import Any, Dict, Tuple, Union
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Tuple, Union
 
 import chex
 import jax
@@ -10,7 +11,17 @@ from gymnax.environments import environment, spaces
 
 from geometry import point_to_rectangle_distance
 from lidar import Collision, simulate_lidar
+from numpy import histogram
 from rooms import RoomParams, sample_distant_position, sample_position
+
+
+@dataclass
+class AgentObservation:
+    pose: jnp.ndarray
+    memory: jnp.ndarray
+    lidar_distances: jnp.ndarray
+    lidar_goal: jnp.ndarray
+    goal_relative: jnp.ndarray
 
 
 @struct.dataclass
@@ -30,7 +41,10 @@ class EnvParams(environment.EnvParams):
     """Radius of the robot for collision detection (meters)"""
     dt: float = 0.1
     """Simulation timestep (seconds)"""
+    memory_init: Callable = struct.field(pytree_node=False, default=lambda: ())
 
+
+    history_size: int = struct.field(pytree_node=False, default=64)
     # Environment parameters
     rooms: RoomParams = struct.field(pytree_node=False, default=RoomParams())
     """Parameters for pre-generated rooms"""
@@ -54,15 +68,19 @@ class EnvParams(environment.EnvParams):
     """Distance threshold for reaching the goal (meters)"""
     step_penalty: float = 0.1
     """Small penalty applied at each timestep to encourage efficiency"""
-    collision_penalty: float = 5.0
+    collision_penalty: float = 3.0
     """Penalty for colliding with obstacles"""
     goal_reward: float = 50.0
     """Reward for reaching the goal"""
     progress_reward: float = 1.0
     """Reward weight for getting closer to the target"""
+    cycling_penalty: float = 0.5
+    """Penalty for cycling in place without making progress"""
+    cycling_penalty_threshold: float = 0.001
+    """Threshold for detecting cycling behavior (meters)"""
 
     # Episode parameters
-    max_steps_in_episode: int = 200
+    max_steps_in_episode: int = 256
     """Maximum number of steps before episode terminates"""
 
 
@@ -78,6 +96,12 @@ class EnvState(struct.PyTreeNode):
     x: jnp.ndarray  # Robot x position (meters)
     y: jnp.ndarray  # Robot y position (meters)
     theta: jnp.ndarray  # Robot orientation (radians)
+
+    # Robot Memory
+    memory: jnp.ndarray  # Memory of previous states
+    
+    # Previous states
+    state_history: jnp.ndarray
 
     # Goal state
     goal_x: jnp.ndarray  # Goal x position (meters)
@@ -112,11 +136,19 @@ class NavigationEnv(environment.Environment):
         self,
         key: chex.PRNGKey,
         state: EnvState,
-        action: Union[chex.Array, int, float],
+        output: Tuple[Union[chex.Array, int, float], chex.Array],
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, jnp.ndarray, jnp.ndarray, Dict[str, Any]]:
         """Perform a single timestep state transition."""
         # 1. Physics update
+        # action, agent_memory = action
+
+        action, new_memory = output
+
+        jax.debug.print("action {x}, memory {y}", x=action, y=new_memory)
+
+        print(f"Action: {action}, Memory: {new_memory}")
+
         action = jnp.asarray(action, dtype=jnp.float32)
         v_left, v_right = jnp.clip(action, -params.max_wheel_speed, params.max_wheel_speed)
         v = (v_left + v_right) / 2.0
@@ -133,6 +165,7 @@ class NavigationEnv(environment.Environment):
         robot_pos = jnp.array([new_x, new_y])
         distances = jax.vmap(point_to_rectangle_distance, in_axes=(None, 0))(robot_pos, state.obstacles)
         collision = jnp.any(distances < params.robot_radius)
+    
 
         # On collision: stay in place and get penalty
         new_x = jnp.where(collision, state.x, new_x)
@@ -150,11 +183,15 @@ class NavigationEnv(environment.Environment):
             new_x, new_y, new_theta, state.obstacles, state.goal_x, state.goal_y, params
         )
 
+        new_history = state.state_history.at[state.steps % params.history_size].set(jnp.asarray([new_x, new_y]))
+
         # 6. Update state
         new_state = EnvState(
             x=new_x,
             y=new_y,
             theta=new_theta,
+            memory=new_memory.squeeze(),
+            state_history=new_history,
             goal_x=state.goal_x,
             goal_y=state.goal_y,
             obstacles=state.obstacles,
@@ -192,8 +229,12 @@ class NavigationEnv(environment.Environment):
         goal_reward = jnp.where(goal_reached, params.goal_reward, 0.0)
         step_penalty = -params.step_penalty
 
-        total_reward = progress_reward + collision_reward + goal_reward + step_penalty
+        pos = jnp.array([new_x, new_y])
 
+        cycling_penalty = jnp.maximum(jnp.sum(jnp.where(jnp.sum(jnp.power(state.state_history - pos, 2), axis=1) < params.cycling_penalty_threshold, -params.cycling_penalty, 0)), - 5 * params.cycling_penalty)
+
+        total_reward = progress_reward + collision_reward + goal_reward + step_penalty + cycling_penalty
+        
         return total_reward, goal_reached
 
     def reset_env(self, key: chex.PRNGKey, params: EnvParams) -> Tuple[chex.Array, EnvState]:
@@ -215,11 +256,15 @@ class NavigationEnv(environment.Environment):
         # Randomly initialize robot orientation
         robot_angle = jax.random.uniform(angle_key, minval=0, maxval=2 * jnp.pi)
 
+        hist = jnp.ones((params.history_size, 2)) * jnp.array([robot_pos[0], robot_pos[1]])
+
         # Create initial state
         state = EnvState(
             x=robot_pos[0],
             y=robot_pos[1],
             theta=robot_angle,
+            memory=params.memory_init(),  # Initialize memory
+            state_history=hist,
             goal_x=goal_pos[0],
             goal_y=goal_pos[1],
             steps=0,
@@ -236,7 +281,7 @@ class NavigationEnv(environment.Environment):
 
         return obs, state
 
-    def _get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def _get_obs(self, state: EnvState, params: EnvParams) -> tuple[chex.Array, chex.Array]:
         """Convert state to observation vector."""
         # Robot pose (x, y, sin, cos)
         pose = jnp.array([state.x, state.y, jnp.sin(state.theta), jnp.cos(state.theta)])
@@ -254,8 +299,18 @@ class NavigationEnv(environment.Environment):
         # Convert collision types to goal flag (1 for goal, 0 for wall/obstacle)
         lidar_goal = (state.lidar_collision_types == Collision.Goal).astype(jnp.float32)
 
+        # return AgentObservation(
+        #     pose=pose,
+        #     memory=state.memory,
+        #     lidar_distances=state.lidar_distances,
+        #     lidar_goal=lidar_goal,
+        #     goal_relative=goal_relative,
+        # )
+
         # Combine robot state, goal, and sensor readings
-        return jnp.concatenate([pose, goal, goal_relative, state.lidar_distances, lidar_goal])
+        # return jnp.concatenate([pose, goal_relative, goal, state.lidar_distances, lidar_goal])#, state.memory
+        # x = jnp.concatenate([pose, state.lidar_distances, lidar_goal])
+        return jnp.concatenate([pose, state.lidar_distances, lidar_goal, state.memory])
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
         """Observation space for the agent.
@@ -264,7 +319,7 @@ class NavigationEnv(environment.Environment):
         goal relative coordinates (distance, angle), lidar distances, and goal flags.
         """
         # Total dimensions: 8 base + lidar distances + goal flags
-        n_dims = 8 + params.lidar_num_beams * 2
+        n_dims = len(params.memory_init()) + 4 + params.lidar_num_beams * 2
 
         # Lower bounds
         low = jnp.concatenate(
