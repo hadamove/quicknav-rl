@@ -11,10 +11,13 @@ requires-python = ">=3.10"
 dependencies = [
     "imageio>=2.37.0",
     "rejax @ git+https://github.com/hadamove/rejax.git@main",
-    "jax[cuda]==0.5.3",
+    "jax==0.5.3",
     "optuna>=4.3.0",
     "optuna-dashboard>=0.18.0",
 ]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda]==0.5.3"]
 
 [dependency-groups]
 dev = [
