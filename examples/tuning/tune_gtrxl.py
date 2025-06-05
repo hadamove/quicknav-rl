@@ -12,7 +12,7 @@ def gtrxl_search_space(trial: optuna.Trial) -> Dict[str, Any]:
     """Define the hyperparameter search space for PPO."""
     return {
         # Model params
-        "embed_dim": trial.suggest_categorical("layers", [8, 16]),
+        "embed_dim": trial.suggest_categorical("embed_dim", [8, 16]),
         "head_dim": trial.suggest_int("head_dim", 1, 8),
         "layer_num": trial.suggest_int("layer_num", 2, 5),
         # Rewards
