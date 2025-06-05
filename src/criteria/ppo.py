@@ -26,7 +26,7 @@ class PPO(DefaultPPO):
     def make_act(self, ts):
         def act(obs, rng):
             if getattr(self, "normalize_observations", False):
-                obs = self.normalize_obs(ts.rms_state, obs)
+                obs = self.normalize_obs(ts.obs_rms_state, obs)
 
             obs = jnp.expand_dims(obs, 0)
             action, memory = self.actor.apply(ts.actor_ts.params, obs, rng, method="act")
@@ -88,8 +88,15 @@ class PPO(DefaultPPO):
             next_obs, env_state, reward, done, _ = t
 
             if self.normalize_observations:
-                rms_state, next_obs = self.update_and_normalize(ts.rms_state, next_obs)
-                ts = ts.replace(rms_state=rms_state)
+                obs_rms_state, next_obs = self.update_and_normalize_obs(
+                    ts.obs_rms_state, next_obs
+                )
+                ts = ts.replace(obs_rms_state=obs_rms_state)
+            if self.normalize_rewards:
+                rew_rms_state, reward = self.update_and_normalize_rew(
+                    ts.rew_rms_state, reward, done
+                )
+                ts = ts.replace(rew_rms_state=rew_rms_state)
 
             # Return updated runner state and transition
             transition = Trajectory(

@@ -1,0 +1,9 @@
+{
+    "learning_rate": 0.0009069412149704695,
+    "batch_size": 512,
+    "buffer_size": 500000,
+    "polyak": 0.9017782256858672,
+    "target_entropy_ratio": 0.8200442512337781,
+    "target_update_freq": 3,
+    "gamma": 0.9601367146137898
+}

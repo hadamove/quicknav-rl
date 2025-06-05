@@ -9,7 +9,7 @@ class MLP(nn.Module):
     hidden_size: list[int]
     dropout_rate: float = 0.5
     deterministic: bool = True
-    mem_len: int = 128
+    mem_len: int = 32
 
     def separate_inputs(self, inputs, batch_size):
         memory = inputs[:, -self.mem_len:]
@@ -20,13 +20,6 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, inpt):
-
-        # print("INPT", inpt, flush=True)
-
-        # x = inpt[:, :-128]
-        # memory = inpt[:, -128:]
-
-        # print(x, flush=True)
         x = inpt
 
         for features in self.hidden_size:
